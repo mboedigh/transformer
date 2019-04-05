@@ -1,0 +1,4 @@
+name = "Attention"
+uuid = "20ed9030-3462-11e9-3a08-9b783a1e1708"
+authors = ["Michael Boedigheimer <mboedigh@amgen.com>"]
+version = "0.1.0"
