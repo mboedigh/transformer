@@ -1,65 +1,72 @@
 
 import Flux
 
-struct Attention
-    Q
-    K
-    V
-    scale
+function attention( q, k, v, scale)
+    score = scale.*( q*k');
+    Flux.softmax(score')'*v  
 end
 
-# Attention
-# d_in is the input dimension - e.g. d_model (same as word embedding size at first layer), 
-# d_k is the output dimension for each attention node (e.g. d_model/n_head)
-# "To facilitate these residual connections, all sub-layers in the model, as well as the embedding layers, produce outputs of dimension dmodel = 512."
-function Attention( d_in::Integer, d_k::Integer; init = Flux.glorot_uniform)
-    return Attention( Flux.param(init(d_in, d_k)), 
-                      Flux.param(init(d_in, d_k)),
-                      Flux.param(init(d_in, d_k)), 
-                      1.0f0 ./ sqrt(d_k) )
-end
-@Flux.treelike Attention
-
-function (z::Attention)(q, k, v, mask::Bool = false) 
-    # score each position in the sequence versus all others
-    # rows correspond to query positions and columns to keys
-    score = z.scale.*( (q*z.Q)*(k*z.K)') 
-    if mask
-        # each position in the decoder attends to all positions in the decoder up to and including that position
-        # we need to prevent leftward information flow in the decoder to preserve the auto-regressive property.
-        # We implement this inside the scaled dot-product attention by masking out (setting to -inf) all values in the input
-        # of the softmax which correspond to illegal connections
-        w = size(score,1);
-        M = similar(score)
-        for i in 1:w
-            for j in 1:w
-                if (j > i)
-                    M[i,j] = score[i,j] < 0 ? eltype(q.data)(Inf) : eltype(q.data)(-Inf)
-                else
-                    M[i,j] = one(eltype(q.data));
-                end
-            end;
-        end
-        score = score.*mask
-       end
-    return Flux.softmax(score')'*(v*z.V)  
+function attention( q, k, v, scale, mask1, mask2)
+    score = (scale.*( q*k')).*mask1 + mask2;
+    Flux.softmax(score')'*v  
 end
 
 # Instead of performing a single attention function with d_model-dimensional keys, values and queries, we found it beneficial to linearly project the queries, 
 # keys and values h times with different, learned linear projections to dq, dk and dv dimensions, respectively. 
+# I am doing these all in one matrix multiply
 struct MultiHeadedAttention
-    heads::Array{Attention,1}
+    n_heads
+    Q
+    K
+    V
+
     # On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional output values. 
     # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
     W;
 end
+
 function MultiHeadedAttention( n_heads::Integer, d_in::Integer, d_k::Integer; init = Flux.glorot_uniform) 
-    return MultiHeadedAttention( [Attention(d_in, d_k, init=init) for i in 1:n_heads], Flux.param(init(n_heads*d_k,n_heads*d_k )) );
+    return MultiHeadedAttention( n_heads, [Linear(d_in, d_k*n_heads, initW=init) for i in 1:4]...);
 end
 
 # On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional output values. 
 # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
-(mha::MultiHeadedAttention)(q,k,v,mask=false) = hcat([mha.heads[i](q,k,v, mask) for i in 1:length(mha.heads)]...)*mha.W;
+# The online version of this (Annotated Transformer uses a gain = bias)
+function (mha::MultiHeadedAttention)(q,k,v)
 
-Flux.children(c::MultiHeadedAttention) = (c.heads..., c.W)
-Flux.mapchildren(f, c::MultiHeadedAttention) = MultiHeadedAttention( f.(c.heads..., c.W)...)
+    Q,K,V = mha.Q(q), mha.Q(k), mha.Q(v);
+    n_k   = (size(q,2)//mha.n_heads).num;
+    h = 1;
+    query  = [view(Q, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+    key    = [view(K, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+    value  = [view(V, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+
+    o = hcat( [attention(z[1],z[2], z[3],1.0/sqrt(n_k)) for z in zip(query,key,value)]...);
+    # once again projected    
+    return mha.W(o);
+end
+
+function (mha::MultiHeadedAttention)(q,k,v,mask)
+
+    Q,K,V = mha.Q(q), mha.Q(k), mha.Q(v);
+    n_k   = (size(q,2)//mha.n_heads).num;
+    h = 1;
+    query  = [view(Q, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+    key    = [view(K, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+    value  = [view(V, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+
+    # each position in the decoder attends to all positions in the decoder up to and including that position
+    # we need to prevent leftward information flow in the decoder to preserve the auto-regressive property.
+    # We implement this inside the scaled dot-product attention by masking out (setting to -inf) all values in the input
+    # of the softmax which correspond to illegal connections
+    w = size(q,1);
+    type = eltype(q.data);
+    mask1 = tril( fill(type(1), w,w))
+    mask2 = triu( fill(type(-1e9),w,w),1)
+
+    o = hcat( [attention(z[1],z[2], z[3],1.0/sqrt(n_k),mask1,mask2) for z in zip(query,key,value)]...);
+    # once again projected    
+    return mha.W(o);
+end
+
+

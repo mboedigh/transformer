@@ -50,4 +50,4 @@ Sublayer( f, d_in, p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Dropout(p_drop
 # implemented by the sub-layer itself."
 # We apply dropout to the output of each sub-layer, before it is added to the sub-layer input..."
 # I take this to mean that x is the sub-layer input. Sublayer (without dashes) is the function
-(s::Sublayer)(x, xs... ; p_drop = 0.1) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )
+(s::Sublayer)(x, xs... ) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )

@@ -6,7 +6,7 @@ struct Encoder
 end
 
 function Encoder( mha::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0)
-    n = size(mha.W,2);
+    n = size(mha.W.W,2);
     Encoder( Sublayer(mha,n,p_drop), Sublayer(ff,n,p_drop))
 end
 (en::Encoder)(x) = return en.mha(x,x,x) |> x -> en.ff( x ) 
@@ -20,7 +20,7 @@ struct Decoder
     ff::Sublayer{PositionwiseFeedForward};
 end
 function Decoder( self::MultiHeadedAttention, memory::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0) 
-    n = size(self.W,2);
+    n = size(self.W.W,2);
     Decoder( Sublayer(self,n, p_drop), Sublayer(memory,n, p_drop), Sublayer(ff,n, p_drop))
 end
 @Flux.treelike Decoder

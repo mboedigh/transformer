@@ -4,9 +4,13 @@
 
 A Dropout layer. For each input, either sets that input to `0` (with probability
 `p`) during training mode. In test mode values are scaled by 1-p (the retain rate)
- (http://www.jmlr.org/papers/volume15/srivastava14a/srivastava14a.pdf)
+ (http://www.jmlr.org/papers/volume15/srivastava14a/srivastava14a.pdf). 
 
-Does nothing to the input once in [`testmode!`](@ref).
+ NO one does it this way. They do it like Flux.Dropout. In particular. During 
+ testing phase, nothing is done. During training, the values are either dropped out (set 
+ to 0), or scaled by 1/(1-p). The ideas is that then the row and column averages will be 
+ expected to be the same (after some are dropped out).
+
 """
 mutable struct Dropout{F}
   p::F
@@ -18,21 +22,20 @@ function Dropout(p)
   Dropout{typeof(p)}(p, true)
 end
 
-_dropout_kernel(y::T, p) where {T} = y > p ? T(1) : T(0)
+
+_dropout_kernel(y::T, p, scale) where {T} = y > p ? T(1/scale) : T(0)
 
 function (a::Dropout)(x)
     # if not active (prob dropout = 0) return x unaltered
     a.p == 0 && return x;
 
-    # if not in training mode, then scale by probability of retaining 
-    if (!a.training) 
-        return x.*(1-a.p);
-    end
+    # if not in training mode
+    !a.training && return x;
 
     # if training mode, then dropout (set input to 0) with probability p
     y = similar(x)
     Flux.rand!(y)
-    y .= _dropout_kernel.(y, a.p)
+    y .= _dropout_kernel.(y, a.p, 1-a.p) # calc reciprocal prior to broadcast
   return x .* y
 end
 

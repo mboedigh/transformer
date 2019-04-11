@@ -5,14 +5,25 @@ struct RepeatedLayer{T<:AbstractArray}
     layers::T
     RepeatedLayer(xs) = new{typeof(xs)}(xs)
 end
-RepeatedLayer(layer, n) = return RepeatedLayer([deepcopy(layer) for i in 1:n]);
-    
+
+# make repeatd layers manually to to initialize params separately 
+# example:
+# es = Array{Encoder}(undef, n_layers,1)
+# for i = 1:n_layers
+#     es[i] = Encoder( MultiHeadedAttention( n_heads, d_model, d_attn), 
+#                      PositionwiseFeedForward(d_model, d_model*4, d_model ); p_drop = p_drop );
+# end    
+# encoder_stack       = RepeatedLayer(es)
+#RepeatedLayer(layer, n) = return RepeatedLayer([deepcopy(layer) for i in 1:n]);
+        
+
 function (e::RepeatedLayer)(x)
    for layer in e.layers
        x = layer(x)
    end
    return x
 end
+
 function (e::RepeatedLayer)(x, xs...)
     for layer in e.layers
         x = layer(x, xs...)
