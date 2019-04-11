@@ -34,7 +34,7 @@ end
 # The online version of this (Annotated Transformer uses a gain = bias)
 function (mha::MultiHeadedAttention)(q,k,v)
 
-    Q,K,V = mha.Q(q), mha.Q(k), mha.Q(v);
+    Q,K,V = mha.Q(q), mha.K(k), mha.V(v);
     n_k   = (size(q,2)//mha.n_heads).num;
     h = 1;
     query  = [view(Q, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
@@ -48,7 +48,7 @@ end
 
 function (mha::MultiHeadedAttention)(q,k,v,mask)
 
-    Q,K,V = mha.Q(q), mha.Q(k), mha.Q(v);
+    Q,K,V = mha.Q(q), mha.K(k), mha.V(v);
     n_k   = (size(q,2)//mha.n_heads).num;
     h = 1;
     query  = [view(Q, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
@@ -70,3 +70,4 @@ function (mha::MultiHeadedAttention)(q,k,v,mask)
 end
 
 
+@Flux.treelike(MultiHeadedAttention)

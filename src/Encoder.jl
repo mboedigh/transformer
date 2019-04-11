@@ -36,6 +36,6 @@ function (en::Decoder)(x, memory)
 end
 
 function Base.show(io::IO, l::Encoder)
-    print(io, "Encoder($(length(l.mha.fn.heads)) heads)" )
+    print(io, "Encoder($(l.mha.fn.n_heads) heads)" )
 end                                    
 

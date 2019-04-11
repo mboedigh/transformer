@@ -21,7 +21,7 @@ end
 
 # Output
 function greedy_decode( model, datum, start_symbol)
-    curmode = setmode(model,false)
+    curmode = setdropoutmode(model,false)
     memory = encode(model, datum);
     d_vocab = size(model.target_embedding.W,1);
     ys = similar(datum);
@@ -32,7 +32,7 @@ function greedy_decode( model, datum, start_symbol)
         word = Flux.onecold(yhat);
         ys[i] =  word[1] # set next word. TODO: check this is right word -- I think it is always a single element, but be sure
     end
-    setmode(model,curmode)
+    setdropoutmode(model,curmode)
     return ys
 end
 
@@ -80,7 +80,6 @@ function transformer_demo()
     warmup = 400;  # for learning rate in optimiser
 
     model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
-    setmode(model,true); 
 
     ps = Flux.params(model);
     local steps = 1;

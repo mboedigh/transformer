@@ -27,7 +27,7 @@ export LayerNorm
 export RepeatedLayer
 export Generator
 export Transformer
-export encode, decode, setmode, predict, attention
+export encode, decode, setdropoutmode, predict, attention
 
 struct Transformer
     source_embedding
@@ -94,7 +94,7 @@ function (t::Transformer)(source, target)
     return yhat
 end
 
-function setmode(t::Transformer, training::Bool = false)
+function setdropoutmode(t::Transformer, training::Bool = false)
     curmode = t.positional_encoding.dropout.training;
     
     # set dropout in all layers to training 
@@ -114,7 +114,7 @@ function setmode(t::Transformer, training::Bool = false)
 end
 
 function predict(model::Transformer, datum, start_symbol = 1)
-    curmode = setmode(model, false); # turn traning off
+    curmode = setdropoutmode(model, false); # turn traning off
 
     memory = encode(model, datum);
     ys = similar(datum);
@@ -127,7 +127,7 @@ function predict(model::Transformer, datum, start_symbol = 1)
     end
     return ys
 
-    setmode(model, curmode);
+    setdropoutmode(model, curmode);
 end
 
 @Flux.treelike Transformer

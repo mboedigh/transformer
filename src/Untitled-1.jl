@@ -1,12 +1,17 @@
 
 
 # turn off dropout so I can look at whether parameters are changing
-setmode(model, false)
+setdropoutmode(model, false)
 ps = Flux.params(model);
 ps1 = deepcopy(ps);
 first(ps1)
 
 opt.eta = learn_rate(400, 400)
+my_loss(batch, target, target_y) = transformer_batch(model, batch, target, target_y);
+
+target = view(batch, :, 1:size(batch,2)-1);
+target_y = view(batch, :, 2:size(batch,2));
+data = [(batch, target, target_y)];
 Flux.train!(my_loss, ps, data, opt)
 
 
