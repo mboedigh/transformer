@@ -68,6 +68,34 @@ function transformer_batch(model, batch, target, target_y)
     lbar =  mean( l );
 end
 
+function transformer_epoch(model, epoch, steps)
+    total_tokens = 0
+    total_loss = 0
+    dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
+    tokens_batch = (batch_size)*(d_strlen-1)
+
+    for (batch_num, batch) in enumerate(dataset)
+        batch_start = time();
+        print( "Epoch $epoch: ");
+        target = view(batch, :, 1:size(batch,2)-1);
+        target_y = view(batch, :, 2:size(batch,2));
+        opt.eta = learn_rate(steps,400);
+        data = [(batch, target, target_y)];
+        Flux.train!(my_loss, ps, data, opt)
+
+        lbar = my_loss( batch, target, target_y);
+        total_tokens += tokens_batch;
+        rate = tokens_batch/(time() - batch_start);
+
+        s = Base.Printf.@sprintf( "Batch: %d Step %d: learn_rate: %.6f, batch_loss: %.2f, tokens: %d, token/s: %.2f",
+        batch_num, steps, opt.eta, lbar, total_tokens, rate )
+        println( s );
+        steps += 1; 
+    end
+
+    return steps;
+end
+
 function transformer_demo()
     d_strlen = 10;   # maximum sequence length
     d_vocab = 11;
@@ -83,34 +111,12 @@ function transformer_demo()
 
     ps = Flux.params(model);
     local steps = 1;
+    step= 1
+    
     my_loss(batch, target, target_y) = transformer_batch(model, batch, target, target_y);
     opt = Flux.ADAM( learn_rate(steps, warmup), (0.9, 0.98) );
     for epoch in 1:10
-        total_tokens = 0
-        total_loss = 0
-        dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
-        tokens_batch = (batch_size)*(d_strlen-1)
-
-        for (batch_num, batch) in enumerate(dataset)
-            batch_start = time();
-            print( "Epoch $epoch: ");
-            target = view(batch, :, 1:size(batch,2)-1);
-            target_y = view(batch, :, 2:size(batch,2));
-            opt.eta = learn_rate(steps,400);
-            data = [(batch, target, target_y)];
-            Flux.train!(my_loss, ps, data, opt)
-
-            lbar = my_loss( batch, target, target_y);
-            total_tokens += tokens_batch;
-            rate = tokens_batch/(time() - batch_start);
-
-            s = Base.Printf.@sprintf( "Batch: %d Step %d: learn_rate: %.6f, batch_loss: %.2f, tokens: %d, token/s: %.2f",
-            batch_num, steps, opt.eta, lbar, total_tokens, rate )
-            println( s );
-            
-            steps += 1; 
-        end
-
+        step = transformer_epoch(model, epoch, step);
     end
     return model
 end

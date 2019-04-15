@@ -31,7 +31,7 @@ LayerNorm(h::Integer) = LayerNorm(Diagonal(h))
 # define a row based normalization to use with Flux.LayerNorm
 function normalise(x,dims)
     u = mean(x, dims=dims);
-    p = 1 ./ std(x,dims=dims);
+    p = 1 ./ (std(x,dims=dims) .+ 1f-6);
     return (x .- u).*p
 end
 (a::LayerNorm)(x,dims=2) = a.diag(normalise(x,dims))
@@ -50,4 +50,7 @@ Sublayer( f, d_in, p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Dropout(p_drop
 # implemented by the sub-layer itself."
 # We apply dropout to the output of each sub-layer, before it is added to the sub-layer input..."
 # I take this to mean that x is the sub-layer input. Sublayer (without dashes) is the function
-(s::Sublayer)(x, xs... ) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )
+# (s::Sublayer)(x, xs... ) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )
+
+# this is how it is done in the annotated transformer. Not like the text implied, but their's works
+(s::Sublayer)(x, xs... ) = x + s.dropout( s.layernorm( s.fn(x, xs...), 2) )
