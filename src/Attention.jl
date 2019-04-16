@@ -26,7 +26,7 @@ struct MultiHeadedAttention
 end
 
 function MultiHeadedAttention( n_heads::Integer, d_in::Integer, d_k::Integer; init = Flux.glorot_uniform) 
-    return MultiHeadedAttention( n_heads, [Linear(d_in, d_k*n_heads, initW=init) for i in 1:4]...);
+    return MultiHeadedAttention( n_heads, [Linear(d_in, d_k*n_heads, initW=init, initb=init) for i in 1:4]...);
 end
 
 # On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional output values. 

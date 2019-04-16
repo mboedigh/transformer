@@ -68,11 +68,13 @@ function transformer_batch(model, batch, target, target_y)
     lbar =  mean( l );
 end
 
-function transformer_epoch(model, epoch, steps)
+function transformer_epoch(model, dataset, opt, ps, epoch, steps)
     total_tokens = 0
     total_loss = 0
-    dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
+    batch_size = size(dataset[1],1)
+    d_strlen = size(dataset[1],2)
     tokens_batch = (batch_size)*(d_strlen-1)
+    my_loss(batch, target, target_y) = transformer_batch(model, batch, target, target_y);
 
     for (batch_num, batch) in enumerate(dataset)
         batch_start = time();
@@ -105,18 +107,17 @@ function transformer_demo()
     P_DROP = 0.1;    
     n_batches = 20;
     batch_size = 30;
-    warmup = 400;  # for learning rate in optimiser
-
-    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
-
-    ps = Flux.params(model);
-    local steps = 1;
     step= 1
     
-    my_loss(batch, target, target_y) = transformer_batch(model, batch, target, target_y);
-    opt = Flux.ADAM( learn_rate(steps, warmup), (0.9, 0.98) );
+    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
+    ps = Flux.params(model);
+    
+    
+    warmup = 400;  # for learning rate in optimiser
+    opt = Flux.ADAM( learn_rate(step, warmup), (0.9, 0.98) );
     for epoch in 1:10
-        step = transformer_epoch(model, epoch, step);
+        dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
+        global step = transformer_epoch(model, dataset, opt, ps, epoch, step);
     end
     return model
 end

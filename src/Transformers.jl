@@ -133,7 +133,7 @@ end
 @Flux.treelike Transformer
 
 function Base.show(io::IO, l::Transformer)
-    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 2)); encoding: $(length(l.encoder_stack.layers)) layers and $(length(l.encoder_stack.layers[1].mha.fn.heads)) heads; decoding: $(length(l.encoder_stack.layers)) layers)")
+    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 2)); encoding: $(length(l.encoder_stack.layers)) layers and $(l.encoder_stack.layers[1].mha.fn.n_heads) heads; decoding: $(length(l.encoder_stack.layers)) layers)")
 end
 
 end
