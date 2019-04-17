@@ -1,3 +1,8 @@
+#Encoder Layer
+#    there are 6 of these connected in series
+#    Each layer has 2 sublayers
+#    One sublayer is for multi-headed self-attention
+#    The other sublayer is for a two-layer feedforward network
 
 
 struct Encoder
