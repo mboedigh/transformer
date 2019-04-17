@@ -51,7 +51,7 @@ Sublayer( f, d_in, p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Dropout(p_drop
 # We apply dropout to the output of each sub-layer, before it is added to the sub-layer input..."
 
 # I take this to mean that x is the sub-layer input. Sublayer (without dashes) is the function
-# (s::Sublayer)(x, xs... ) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )
+(s::Sublayer)(x, xs... ) = s.layernorm( x + s.dropout(s.fn(x, xs...)),2 )
 
-# this is how it is done in the annotated transformer. Not like the text implied, but their's works
-(s::Sublayer)(x, xs... ) = x + s.dropout( s.layernorm( s.fn(x, xs...), 2) )
+# this is how it is done in the annotated transformer. It is not like the text implied, but is in the annotated transformer
+# (s::Sublayer)(x, xs... ) = x + s.dropout( s.layernorm( s.fn(x, xs...), 2) )

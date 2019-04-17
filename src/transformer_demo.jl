@@ -30,7 +30,7 @@ function transformer_demo()
         
     # optimizer
     warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below 
-    learn_rate(step, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( step.^-0.5f0 , step .* warmup.^-1.5)
+
     opt = Flux.ADAM( learn_rate(step, warmup), (0.9, 0.98) );
     for epoch in 1:30
         dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
@@ -42,6 +42,8 @@ function transformer_demo()
     # @assert all( a .== 1:10);  # this is not deterministic, and so is commented out. Do it with the model that transformer_demo() returns
     return model
 end
+
+learn_rate(step, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( step.^-0.5f0 , step .* warmup.^-1.5);
 
 function data_gen(batch_size, d_vocab, d_strlen, d_model, nbatches)
     # "Generate random data for a src-tgt copy task. i.e. the target is an exact copy of the source"
@@ -98,6 +100,9 @@ function transformer_epoch(model, dataset, opt, ps, epoch, steps)
     
     return steps;
 end
+
+
+loss(ypred, y, d_vocab) = Flux.crossentropy( ypred, Flux.onehotbatch(y, 1:d_vocab)' );
 
 # calculate mean loss over a batch of data
 function transformer_batch(model, batch, target, target_y)
