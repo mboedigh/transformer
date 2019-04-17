@@ -1,45 +1,33 @@
+using Flux
 using Transformers
+
 lre(x) = -log10.(abs.(x))
 
-d_strlen = 10;   # maximum sequence length
-d_vocab = 11;
-d_model = 512;
-n_heads  = 8;    # number of heads in Mulit-headed attention (8 were used in the paper)
-n_layers = 6;
-P_DROP = 0.1;    # turn to 0.0 for testing otherwise it is not deterministic
+include("$(@__DIR__)/../src/make_transformer_data.jl");
 
-model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP);
 
-batch_size = 30;
-n_batches = 2;
-src = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
-batch = src[1];
-datum = batch[1,:]; 
-
-# testing (bottom up)
-# each element of datum is a input in a sequence. Embedding is a d_model vector describing each element 
-input = datum |> model.source_embedding;
+# each element of datum is a single input sequence. Embedding is a d_model vector describing each element 
+input = datum |> model.source_embedding;  # this only needs to run without throwing an error
 
 # LayerNorm
 # implemented by Flux, but Flux normalizes columns and I need to normalize rows (or transpose everything), so that each example (input row) is normalized
 l = Transformers.LayerNorm( d_model);
 input = rand(d_strlen, d_model)
 x = l(input,2);
-@assert all( lre(mean(x,dims=2)) .> 6  )
-@assert all( lre(std(x,dims=2) .- 1) .> 6  )
-Flux.params(l); # I don't know what to test here, but at least it returns something reasonable
+@assert all( lre(mean(x,dims=2)) .> 6  )    # good to 6 digits
+@assert all( lre(std(x,dims=2) .- 1) .> 5 ) # good to 5 digits
 
 # Dropout
 # Dropout inactive
-d = Dropout(0); # p_drop = 0, so dropout is inactive 
+d = Dropout(0.0f0); # p_drop = 0, so dropout is inactive 
 x = rand(100,100);
 @assert x == d(x)
 
 # dropout p_drop = 0.1, scale = 1/(1-p_drop)
-d = Dropout(0.1);
+d = Transformers.Dropout(0.1);
 xo = d(x);
 i = xo .!= 0;
-@assert xo[i] == x[i]*(1/(1-d.p))
+@assert all( lre( xo[i] - x[i]*(1/(1-d.p))) .> 6)
 
 # sublayer
 # adds the input to the layer-normalized output of a function. 
@@ -49,7 +37,6 @@ x = [1.0 3 5; 2 4 6];
 s = Sublayer(f, size(x,2), 0.0)
 out = s(x);
 @assert all( lre(out - [-1 0 1.; -1 0 1]) .> 10 )
-ps = Flux.params(s); # I don't know what to test here, but at least it returns something reasonable
 
 # test function and normalization
 x = rand(2,4)
@@ -61,36 +48,36 @@ out = s(x);
 
 # RepeatedLayers
 # Simple chain of identical layers. Output from one layer is passed to the next. 
-r = RepeatedLayer(f, 6)
+n_layers = 6
+ds = [f for i = 1;n_layers];
+r = RepeatedLayer(ds)
 x = [1.0 3 5; 2 4 6];
 out = r(x);
 @assert all( lre(out -  x * 2^6 ) .> 10) # accurate to at least 10 digits
 
-r = RepeatedLayer(f,0) # 0 layers returns x (runs function 0 times)
+n_layers = 0 # 0 layers returns x (runs function 0 times)
+ds = [f for i = 1;n_layers];
+r = RepeatedLayer(ds) 
 @assert x == r(x)
 
-r = RepeatedLayer(f,1) # runs the function 1 time
+n_layers = 1 # runs function 1 times, I believe this completes proof by induction
+ds = [f for i = 1;n_layers];
+r = RepeatedLayer(ds) 
 @assert all( lre(r(x) -  x * 2 ) .> 10) # accurate to at least 10 digits
 
-r = RepeatedLayer(s, 3);
-ps = Flux.params(r); # I don't know what to test here, but at least it returns something reasonable
-
 # Embedding
-# how to test word embedding?????
+# I don't know how to test word embedding, except that it runs
 W = Flux.param(rand(Float32, d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
 embedding           = Embedding(W);   
 x = datum |> embedding; 
 ps = Flux.params( embedding );
-@assert length(ps) == 1
-
-ch = Flux.Chain( embedding, embedding);
-ps = Flux.params(ch)
-@assert length(ps) == 1 # W is used only once, no duplicates
+@assert length(ps) == 1 # only the Look up table of parameters. each word (token) in the sequence has a d_model vector of parameters
 
 # PositionalEncoding
 # each word in a sequence is a different point along a sinusoid. AND, each feature in d_model is a different family of sinusoid (frequency and sine versus cosine)
 pe = PositionalEncoding(100, d_model, 0);
 z = zeros( 100, d_model) |> pe;
+# first feature is a sine
 # plot( 1:100, z[:,5:8]); # takes too long to load Plots and draw!
 
 ff = PositionwiseFeedForward(d_model,d_model*4,d_model);

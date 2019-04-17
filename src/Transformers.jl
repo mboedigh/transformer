@@ -1,3 +1,7 @@
+# Based on the paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
+# and a reference implementation [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the 
+# Many of the explanatory comments throughout my code are taken directly from the paper
+
 __precompile__(false)
 module Transformers
 import Flux
@@ -44,14 +48,14 @@ function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers 
     init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     W = Flux.param(init(d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
-    embedding           = Embedding(W);   
+    embedding           = Embedding(W);   # my implementation did not do this because the reference implementation did not seem to do it
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
-    # target_embedding    = Embedding(W); # with sharingh
+    # target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
+    target_embedding    = Embedding(W); # with sharing
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't seem to make sense. More like divide by embedding than project with it
+    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
 
     positional_encoding = PositionalEncoding(max_seq_len, d_model; p_drop = p_drop);
 
@@ -75,8 +79,6 @@ function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers 
                         PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
     end    
     decoder_stack       = RepeatedLayer(ds)
-
-
 
     return Transformer(embedding, positional_encoding, encoder_stack, decoder_stack, target_embedding, generator);
 end
@@ -116,7 +118,7 @@ function setdropoutmode(t::Transformer, training::Bool = false)
 end
 
 function predict(model::Transformer, datum, start_symbol = 1)
-    curmode = setdropoutmode(model, false); # turn traning off
+    curmode = setdropoutmode(model, false); # turn training off
 
     memory = encode(model, datum);
     ys = similar(datum);
@@ -135,7 +137,7 @@ end
 @Flux.treelike Transformer
 
 function Base.show(io::IO, l::Transformer)
-    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 2)); encoding: $(length(l.encoder_stack.layers)) layers and $(l.encoder_stack.layers[1].mha.fn.n_heads) heads; decoding: $(length(l.encoder_stack.layers)) layers)")
+    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 2))); $(length(l.encoder_stack.layers)) layers and $(l.encoder_stack.layers[1].mha.fn.n_heads) heads in both encoder and decoder stacks")
 end
 
 end

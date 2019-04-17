@@ -41,10 +41,19 @@ function (mha::MultiHeadedAttention)(q,k,v)
     key    = [view(K, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
     value  = [view(V, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
 
+    # can perform attention inplace with something like this, but I didn't notice any difference in allocations or performance
+    # o = Array{eltype(q)}(undef,size(q))
+    # oview  = [view(o, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
+    # attention!(oview, query, key, value, scale); // for each o,q,k,v 
+
     # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
     scale = typeof(q.data[1])(1.0/sqrt(n_k))
+    # this works with some (all?) versions of Flux
     o = [attention(z[1],z[2], z[3],scale) for z in zip(query,key,value)];
     o = hcat(o...); # supposedly slower than reduct(hcat,o), but produces different outputs
+
+    # this fails with some versions of Flux, due to unsupported softmax! with array of tracked real
+    # o = [attention(z[1],z[2], z[3],scale) for z in zip(query,key,value)];
     # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower
     
     # and once again projected    

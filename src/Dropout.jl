@@ -13,6 +13,7 @@ A Dropout layer. For each input, either sets that input to `0` (with probability
  expected to be the same (after some are dropped out).
 
 """
+
 mutable struct Dropout{F}
   p::F
   training::Bool
