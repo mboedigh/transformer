@@ -6,7 +6,8 @@ A Dropout layer. For each input, either sets that input to `0` (with probability
 `p`) during training mode. In test mode values are scaled by 1-p (the retain rate)
  (http://www.jmlr.org/papers/volume15/srivastava14a/srivastava14a.pdf). 
 
- NO one does it this way. They do it like Flux.Dropout. In particular. During 
+ NO one does it the way it is described in the paper, so I'm not sure why it is still cited. 
+ The reference implementations seem to do it like Flux.Dropout. In particular. During 
  testing phase, nothing is done. During training, the values are either dropped out (set 
  to 0), or scaled by 1/(1-p). The ideas is that then the row and column averages will be 
  expected to be the same (after some are dropped out).
@@ -32,10 +33,10 @@ function (a::Dropout)(x)
     # if not in training mode
     !a.training && return x;
 
-    # if training mode, then dropout (set input to 0) with probability p
-    y = similar(x)
+    # if training mode, then dropout (set input to 0) with probability p, and scale the rest by 1/(1-p)
+    y = Array{Float32}(undef, size(x));
     Flux.rand!(y)
-    y .= _dropout_kernel.(y, a.p, 1-a.p) # calc reciprocal prior to broadcast
+    y .= _dropout_kernel.(y, a.p, 1-a.p) 
   return x .* y
 end
 

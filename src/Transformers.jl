@@ -39,12 +39,19 @@ struct Transformer
     generator
 end
 
-function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers = 6, p_drop = 0.1) 
+function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers = 6, p_drop = 0.1f0) 
     
     init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     W = Flux.param(init(d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
     embedding           = Embedding(W);   
+
+    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
+    target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
+    # target_embedding    = Embedding(W); # with sharingh
+
+    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
+    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't seem to make sense. More like divide by embedding than project with it
 
     positional_encoding = PositionalEncoding(max_seq_len, d_model; p_drop = p_drop);
 
@@ -69,12 +76,7 @@ function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers 
     end    
     decoder_stack       = RepeatedLayer(ds)
 
-    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    WT = Flux.param(init(d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
-    target_embedding    = Embedding(WT); # I am trying without sharing
 
-    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't seem to make sense. More like divide by embedding than project with it
 
     return Transformer(embedding, positional_encoding, encoder_stack, decoder_stack, target_embedding, generator);
 end
@@ -122,7 +124,7 @@ function predict(model::Transformer, datum, start_symbol = 1)
     for i in 2:length(datum)
         out  = decode(model, ys[1:i - 1], memory) # predict next word based decoding of current word, and memory from encoding
         yhat = model.generator(out[end,:]')
-        word = Flux.onecold(yhat);
+        word = Flux.onecold(yhat');
         ys[i] =  word[1] # set next word. 
     end
     return ys

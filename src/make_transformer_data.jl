@@ -8,7 +8,7 @@ d_vocab = 11;
 d_model = 512;
 n_heads  = 8;    # number of heads in Mulit-headed attention (8 were used in the paper)
 n_layers = 6;    # 6 in the paper
-P_DROP = 0.1;    
+P_DROP = 0.1f0;    
 
 model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = n_layers, n_heads = n_heads);
 

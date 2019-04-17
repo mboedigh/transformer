@@ -14,7 +14,7 @@ struct Diagonal{T}
   α::T
   β::T
 end
-Diagonal(in::Integer; initα = ones, initβ = zeros) =  Diagonal(Flux.param(initα(1,in)), Flux.param(initβ(1,in)))
+Diagonal(in::Integer; initα = Flux.ones, initβ = Flux.zeros) =  Diagonal(Flux.param(initα(1,in)), Flux.param(initβ(1,in)))
 @Flux.treelike Diagonal
 
 function (a::Diagonal)(x)

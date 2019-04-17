@@ -107,18 +107,21 @@ function transformer_demo()
     P_DROP = 0.1;    
     n_batches = 20;
     batch_size = 30;
-    step= 1
-    
+    step = 1
+
     model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
     ps = Flux.params(model);
     
     
     warmup = 400;  # for learning rate in optimiser
     opt = Flux.ADAM( learn_rate(step, warmup), (0.9, 0.98) );
-    for epoch in 1:10
+    for epoch in 11:100
         dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
         global step = transformer_epoch(model, dataset, opt, ps, epoch, step);
     end
+
+    a = predict(model, 1:10 );
+    @assert all( a .== 1:10); 
     return model
 end
 

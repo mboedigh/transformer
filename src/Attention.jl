@@ -41,8 +41,13 @@ function (mha::MultiHeadedAttention)(q,k,v)
     key    = [view(K, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
     value  = [view(V, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
 
-    o = hcat( [attention(z[1],z[2], z[3],1.0/sqrt(n_k)) for z in zip(query,key,value)]...);
-    # once again projected    
+    # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
+    scale = typeof(q.data[1])(1.0/sqrt(n_k))
+    o = [attention(z[1],z[2], z[3],scale) for z in zip(query,key,value)];
+    o = hcat(o...); # supposedly slower than reduct(hcat,o), but produces different outputs
+    # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower
+    
+    # and once again projected    
     return mha.W(o);
 end
 
@@ -64,10 +69,16 @@ function (mha::MultiHeadedAttention)(q,k,v,mask)
     mask1 = tril( fill(type(1), w,w))
     mask2 = triu( fill(type(-1e9),w,w),1)
 
-    o = hcat( [attention(z[1],z[2], z[3],1.0/sqrt(n_k),mask1,mask2) for z in zip(query,key,value)]...);
+    scale = typeof(q.data[1])(1.0/sqrt(n_k))
+    o = [attention(z[1],z[2], z[3],scale,mask1,mask2) for z in zip(query,key,value)];
+    o = hcat(o...); # supposedly slower than reduct(hcat,o), but produces different outputs
+    # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower
     # once again projected    
     return mha.W(o);
 end
+
+(mha::MultiHeadedAttention)(q) = mha(q,q,q); # one argument call for self-attention without masking
+
 
 
 @Flux.treelike(MultiHeadedAttention)
