@@ -39,10 +39,10 @@ end
 struct Sublayer{T}
     fn::T
     layernorm::LayerNorm
-    dropout::Dropout;
+    dropout::Flux.Dropout;
 end
-Sublayer( f, d_in; p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Dropout(p_drop) )
-Sublayer( f, d_in, p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Dropout(p_drop) )
+Sublayer( f, d_in; p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Flux.Dropout(p_drop) )
+Sublayer( f, d_in, p_drop = 0.1 ) = Sublayer( f, LayerNorm(d_in), Flux.Dropout(p_drop) )
 @Flux.treelike Sublayer
 
 # We employ a residual connection around each of the two sub-layers, followed by layer normalization. 

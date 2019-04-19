@@ -7,7 +7,6 @@ module Transformers
 import Flux
 using LinearAlgebra
 
-include("Dropout.jl")
 include("Sublayer.jl")
 include("Embedding.jl")
 include("PositionalEncoding.jl")
@@ -18,7 +17,6 @@ include("RepeatedLayer.jl")
 include("Encoder.jl")
 include("Generator.jl")
 
-export Dropout
 export Sublayer
 export Embedding
 export PositionalEncoding

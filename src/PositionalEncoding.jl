@@ -7,7 +7,7 @@ import Base.copy
 struct PositionalEncoding
     d_in
     d_model
-    dropout::Dropout
+    dropout::Flux.Dropout
     encodings
 
     # ...we add "positional encodings" to the input embeddings at the bottoms of the encoder and decoder stacks. 
@@ -30,7 +30,7 @@ struct PositionalEncoding
             encodings[i, j*2] = cos(i.*wavelength[j])
         end
     
-        new(d_maxlen, d_model, Dropout(p_drop), encodings);
+        new(d_maxlen, d_model, Flux.Dropout(p_drop), encodings);
     
     end
 end
