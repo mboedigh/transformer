@@ -11,7 +11,6 @@ include("Sublayer.jl")
 include("Embedding.jl")
 include("PositionalEncoding.jl")
 include("PositionwiseFeedForward.jl")
-include("Linears.jl")
 include("Attention.jl")
 include("RepeatedLayer.jl")
 include("Encoder.jl")
@@ -45,12 +44,11 @@ function Transformer(max_seq_len, d_vocab, d_model = 512; n_heads = 8, n_layers 
     
     init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    W = Flux.param(init(d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
-    embedding           = Embedding(W);   # my implementation did not do this because the reference implementation did not seem to do it
+    embedding           = Embedding(d_vocab, d_model);   # my implementation did not do this because the reference implementation did not seem to do it
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
-    # target_embedding    = Embedding(W); # with sharing
+    target_embedding    = Embedding(d_vocab, d_model); # without sharing
+    # target_embedding   = Embedding(embedding.W); # with sharing
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
@@ -97,20 +95,20 @@ function (t::Transformer)(source, target)
 end
 
 function setdropoutmode(t::Transformer, training::Bool = false)
-    curmode = t.positional_encoding.dropout.training;
+    curmode = t.positional_encoding.dropout.active;
     
     # set dropout in all layers to training 
-    t.positional_encoding.dropout.training = training;
+    t.positional_encoding.dropout.active = training;
     for l in t.encoder_stack.layers
-        l.mha.dropout.training = training;
-        l.ff.dropout.training = training;
+        l.mha.dropout.active = training;
+        l.ff.dropout.active = training;
     end
 
     # set dropout in all layers to training 
     for l in t.decoder_stack.layers
-        l.self_attn.dropout.training = training;
-        l.encoder_attn.dropout.training = training;
-        l.ff.dropout.training = training;
+        l.self_attn.dropout.active = training;
+        l.encoder_attn.dropout.active = training;
+        l.ff.dropout.active = training;
     end
     return curmode
 end
@@ -135,7 +133,7 @@ end
 @Flux.treelike Transformer
 
 function Base.show(io::IO, l::Transformer)
-    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 2))); $(length(l.encoder_stack.layers)) layers and $(l.encoder_stack.layers[1].mha.fn.n_heads) heads in both encoder and decoder stacks")
+    print(io, "Transformer(d_model:$(size(l.source_embedding.W, 1))); $(length(l.encoder_stack.layers)) layers and $(l.encoder_stack.layers[1].mha.fn.n_heads) heads in both encoder and decoder stacks")
 end
 
 end

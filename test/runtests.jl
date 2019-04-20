@@ -89,13 +89,14 @@ ps = Flux.params(ff); # I don't know what to test here, but at least it returns 
 
 # Attention 
 d_attn = Int32(d_model/n_heads);
-x      = randn(Float32, 10,d_model)
+x      = randn(Float32, d_model,10)
 range = 1:d_attn
 mha                 = MultiHeadedAttention( n_heads, d_model, d_attn);
 
-Q,K,V = x*view(mha.Q.W,:,range), x*view(mha.K.W,:,range), x*view(mha.V.W, :,range);
+Q,K,V = view(mha.Q.W,range, :)*x, view(mha.K.W,range,:)*x, view(mha.V.W,range, :)*x;
+
 scale = Float32(1/sqrt(d_attn))
-score = (Q*K')*scale;
+score = (K'*Q)*scale;
 sm_score     = Flux.softmax( score' )';
 Z = sm_score*V;
 @test all( lre( attention(Q,K,V,scale) - Z) .> 10)

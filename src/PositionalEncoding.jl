@@ -24,13 +24,13 @@ struct PositionalEncoding
         wavelength = 1 ./ freq;
     
     # The positional encodings have the same dimension dmodel as the embeddings, so that the two can be summed. 
-        encodings = Array{Float32}( undef, d_maxlen, d_model);
+        encodings = Array{Float32}( undef, d_model, d_maxlen);
         for i in 1:d_maxlen, j in 1:len
-            encodings[i, j*2-1] = sin(i.*wavelength[j])
-            encodings[i, j*2] = cos(i.*wavelength[j])
+            encodings[j*2-1,i] = sin(i.*wavelength[j])
+            encodings[j*2,i] = cos(i.*wavelength[j])
         end
     
-        new(d_maxlen, d_model, Flux.Dropout(p_drop), encodings);
+        new(d_maxlen, d_model, Flux.Dropout(p_drop), encodings); 
     
     end
 end
@@ -39,6 +39,6 @@ PositionalEncoding(d_maxlen, d_model; p_drop = 0.1f0)  = PositionalEncoding(d_ma
 
 function (p::PositionalEncoding)(x) 
     # ...we apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks
-    p.dropout( x + p.encodings[1:size(x,1),:] );
+    p.dropout( x + p.encodings[:,1:size(x,2)] );
 end
 
