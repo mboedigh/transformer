@@ -122,20 +122,3 @@ function transformer_loss( model, datum, target, target_y)
     d_vocab = size(model.source_embedding.W,2);
     return  Flux.crossentropy( yhat, Flux.onehotbatch(target_y, 1:d_vocab) );
 end
-
-struct Rows
-    A::AbstractArray
-end
-Base.iterate(r::Rows) =  size(r.A,1)>0 ? (r.A[1,:],2) : nothing
-Base.iterate(r::Rows, state) =  state <= size(r.A,1) ? (r.A[state,:], state+1) : nothing
-Base.length(r::Rows) = size(r.A,1)
-Base.eltype(r::Rows) = eltype(r::A)
-
-
-struct Cols
-    A::AbstractArray
-end
-Base.iterate(r::Cols) =  size(r.A,2)>0 ? (r.A[:,1],2) : nothing
-Base.iterate(r::Cols, state) =  state <= size(r.A,2) ? (r.A[:,state], state+1) : nothing
-Base.length(r::Cols) = size(r.A,2)
-Base.eltype(r::Cols) = eltype(r::A)
