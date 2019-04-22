@@ -97,8 +97,8 @@ Q,K,V = view(mha.Q.W,range, :)*x, view(mha.K.W,range,:)*x, view(mha.V.W,range, :
 
 scale = Float32(1/sqrt(d_attn))
 score = (K'*Q)*scale;
-sm_score     = Flux.softmax( score' )';
-Z = sm_score*V;
+sm_score     = Flux.softmax( score );
+Z = V*sm_score;
 @test all( lre( attention(Q,K,V,scale) - Z) .> 10)
 
 # MultiHeadedAttention

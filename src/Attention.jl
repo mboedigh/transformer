@@ -29,6 +29,7 @@ struct MultiHeadedAttention
     W;
 end
 
+
 function MultiHeadedAttention( n_heads::Integer, d_in::Integer, d_k::Integer; init = Flux.glorot_uniform)
     return MultiHeadedAttention( n_heads, [Flux.Dense(d_in, d_k*n_heads, initW=init, initb=init) for i in 1:4]...);
 end
