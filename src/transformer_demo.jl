@@ -1,14 +1,14 @@
-# 
+#
 using Statistics
 using LinearAlgebra
 import Flux
 using Transformers
 
 """
-Returns a trained Transformer model on a trivial task that can predict the next token of input sequence (producing an exact copy) 
-Based on [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the 
+Returns a trained Transformer model on a trivial task that can predict the next token of input sequence (producing an exact copy)
+Based on [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the
 paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
-    
+
     julia> include("transformer_demo.jl")
     julia> model = transformer_demo();
     julia> @assert all( model.predict(1:10) .= 1:10 ); # if it converged
@@ -20,22 +20,22 @@ function transformer_demo()
     d_model = 512;
     n_heads  = 8;    # number of heads in Mulit-headed attention (8 were used in the paper)
     n_layers = 2;
-    P_DROP = 0.1;    
+    P_DROP = 0.1;
     n_batches = 20;
     batch_size = 30;
-    step = 1
+    stepnum = 1
 
     model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
     ps = Flux.params(model);
-        
-    # optimizer
-    warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below 
 
-    opt = Flux.ADAM( learn_rate(step, warmup), (0.9, 0.98) );
+    # optimizer
+    warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
+
+    opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) );
     for epoch in 1:30
         dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
-        # global step = transformer_epoch(model, dataset, opt, ps, epoch, step); # this to manually extend epochs from the command line (send the for loop to the REPL)
-        step = transformer_epoch(model, dataset, opt, ps, epoch, step); # this works in the script, but not on the command line
+        # global step = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this to manually extend epochs from the command line (send the for loop to the REPL)
+        stepnum = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this works in the script, but not on the command line
     end
 
     # a = predict(model, 1:10 );
@@ -43,7 +43,7 @@ function transformer_demo()
     return model
 end
 
-learn_rate(step, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( step.^-0.5f0 , step .* warmup.^-1.5);
+learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepnum.^-0.5f0 , stepnum .* warmup.^-1.5);
 
 function data_gen(batch_size, d_vocab, d_strlen, d_model, nbatches)
     # "Generate random data for a src-tgt copy task. i.e. the target is an exact copy of the source"
@@ -53,7 +53,7 @@ function data_gen(batch_size, d_vocab, d_strlen, d_model, nbatches)
     # tgt_mask = [tril( ones(d_model,d_model)) for i in 1:nbatches]
 
     for i = 1:size(data,1)
-       d = view( data[i], :, 1 ); 
+       d = view( data[i], :, 1 );
        fill!(d, 1);
     end
     return data
@@ -65,7 +65,7 @@ function make_transformer_model()
     d_model = 512;
     n_heads  = 8;    # number of heads in Mulit-headed attention (8 were used in the paper)
     n_layers = 6;    # 6 in the paper
-    P_DROP = 0.1;    
+    P_DROP = 0.1;
 
     model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = n_layers, n_heads = n_heads);
 end
@@ -78,7 +78,7 @@ function transformer_epoch(model, dataset, opt, ps, epoch, steps)
     d_strlen = size(dataset[1],2)
     tokens_batch = (batch_size)*(d_strlen-1)
     my_loss(batch, target, target_y) = transformer_batch(model, batch, target, target_y);
-    
+
     for (batch_num, batch) in enumerate(dataset)
         batch_start = time();
         print( "Epoch $epoch: ");
@@ -87,17 +87,17 @@ function transformer_epoch(model, dataset, opt, ps, epoch, steps)
         opt.eta = learn_rate(steps,400);
         data = [(batch, target, target_y)];
         Flux.train!(my_loss, ps, data, opt)
-        
+
         lbar = my_loss( batch, target, target_y);
         total_tokens += tokens_batch;
         rate = tokens_batch/(time() - batch_start);
-        
+
         s = Base.Printf.@sprintf( "Batch: %d Step %d: learn_rate: %.6f, batch_loss: %.2f, tokens: %d, token/s: %.2f",
         batch_num, steps, opt.eta, lbar, total_tokens, rate )
         println( s );
-        steps += 1; 
+        steps += 1;
     end
-    
+
     return steps;
 end
 
