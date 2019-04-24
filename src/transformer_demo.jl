@@ -120,8 +120,6 @@ function transformer_epoch(model, dataset, opt, ps, epoch, steps)
         # data = [(batch, target, target_y)];
         # Flux.train!(my_loss, ps, data, opt)
 
-        gs = Flux.gradient(()->transformer_batch(model, batch, target, target_y), ps);
-        Flux.Tracker.update!(opt, ps, gs);
         lbar = my_loss( batch, target, target_y);
 
         total_tokens += tokens_batch;
