@@ -20,11 +20,9 @@ export Sublayer
 export Embedding
 export PositionalEncoding
 export PositionwiseFeedForward
-export Linear
 export MultiHeadedAttention
 export Encoder
 export Decoder
-export LayerNorm
 export RepeatedLayer
 export Generator
 export Transformer
@@ -94,7 +92,7 @@ function (t::Transformer)(source, target)
     return yhat
 end
 
-function setdropoutmode(t::Transformer, training::Bool = false)
+function setdropoutmode(t::Transformer, training::Bool = true)
     curmode = t.positional_encoding.dropout.active;
 
     # set dropout in all layers to training

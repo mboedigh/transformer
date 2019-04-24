@@ -73,8 +73,8 @@ ps = Flux.params( embedding );
 
 # PositionalEncoding
 # each word in a sequence is a different point along a sinusoid. AND, each feature in d_model is a different family of sinusoid (frequency and sine versus cosine)
-pe = PositionalEncoding(100, d_model, 0);
-z = zeros( 100, d_model) |> pe;
+pe = PositionalEncoding(100, d_model, 0.0f0);
+z = zeros( d_model, 100) |> pe;
 # first feature is a sine
 # plot( 1:100, z[:,5:8]); # takes too long to load Plots and draw!
 

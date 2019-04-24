@@ -38,13 +38,12 @@ end
 # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
 # The online version of this (Annotated Transformer uses a gain = bias)
 function (mha::MultiHeadedAttention)(q,k,v,mask=nothing)
-
     Q,K,V = mha.Q(q), mha.K(k), mha.V(v);
     n_k   = (size(q,1)//mha.n_heads).num;
 
-    query  = [view(Q, (h*n_k+1):(h+1)*n_k,:) for h in 0:mha.n_heads-1];
-    key    = [view(K, (h*n_k+1):(h+1)*n_k,:) for h in 0:mha.n_heads-1];
-    value  = [view(V, (h*n_k+1):(h+1)*n_k,:) for h in 0:mha.n_heads-1];
+    query  = map(h->view(Q, (h*n_k+1):(h+1)*n_k,:), 0:mha.n_heads-1);
+    key    = map(h->view(K, (h*n_k+1):(h+1)*n_k,:),0:mha.n_heads-1);
+    value  = map(h->view(V, (h*n_k+1):(h+1)*n_k,:), 0:mha.n_heads-1);
 
     # each position in the decoder attends to all positions in the decoder up to and including that position
     # we need to prevent leftward information flow in the decoder to preserve the auto-regressive property.
@@ -57,14 +56,14 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing)
         type  = eltype(q.data);
         mask1 = triu( fill(type(1), w,w))
         mask2 = tril( fill(type(-Inf),w,w),-1)  # try -Inf instead of -1e9 (-inf is generalizes to other Float types)
-        o = [attention(z[1],z[2], z[3],scale,mask1,mask2) for z in zip(query,key,value)];
+        o = map( (q,k,v) -> attention(q,k,v,scale,mask1, mask2),query,key,value);
     else
-        o = [attention(z[1],z[2], z[3],scale) for z in zip(query,key,value)];
+        o = map( (q,k,v) -> attention(q,k,v,scale),query,key,value);
     end
 
     # These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2.
-    o = vcat(o...); # supposedly slower than reduce(vcat,o), but produces different outputs
-    # o = reduce( hcat, o); # avoids splat operator (o = vcat(o...)), which is supposedly slower
+    o = vcat(o...); # supposedly slower than reduce(vcat,o), but produces different outputs (tracked Array vs Array of tracked)
+    # o = reduce( hcat, o); # this is supposed to be faster than using splat operator (o = vcat(o...))
     # once again projected
     return mha.W(o);
 end
