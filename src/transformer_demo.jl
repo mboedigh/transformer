@@ -2,7 +2,7 @@
 using Statistics
 using LinearAlgebra
 import Flux
-using Transformers
+using  Transformers
 
 """
 Returns a trained Transformer model on a trivial task that can predict the next token of input sequence (producing an exact copy)
@@ -26,6 +26,35 @@ function transformer_demo()
     stepnum = 1
 
     model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
+    ps = Flux.params(model);
+
+    # optimizer
+    warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
+
+    opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) );
+    for epoch in 1:30
+        dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
+        # global step = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this to manually extend epochs from the command line (send the for loop to the REPL)
+        stepnum = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this works in the script, but not on the command line
+    end
+
+    # a = predict(model, 1:10 );
+    # @assert all( a .== 1:10);  # this is not deterministic, and so is commented out. Do it with the model that transformer_demo() returns
+    return model
+end
+
+function transformer_demo_tiny()
+    d_strlen = 10;   # maximum sequence length
+    d_vocab = 11;
+    d_model = 64;
+    n_heads  = 4;    # number of heads in Mulit-headed attention (8 were used in the paper)
+    n_layers = 2;    # 6 layers were used in both the encoder and decoder stacks
+    P_DROP = 0.1;
+    n_batches = 20;
+    batch_size = 30;
+    stepnum = 1
+
+    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_heads=n_heads, n_layers=n_layers);
     ps = Flux.params(model);
 
     # optimizer
@@ -106,11 +135,11 @@ loss(ypred, y, d_vocab) = Flux.crossentropy( ypred, Flux.onehotbatch(y, 1:d_voca
 
 # calculate mean loss over a batch of data
 function transformer_batch(model, batch, target, target_y)
-    memory   = [encode(model,c) for c in Rows(batch)];
-    out      = [decode( model, x, memory) for (x, memory) = zip(Rows(target), memory ) ];
+    memory   = [encode(model,c) for c in eachrow(batch)];
+    out      = [decode( model, x, memory) for (x, memory) = zip(eachrow(target), memory ) ];
     yhat     = [model.generator( o ) for o in out];
     d_vocab  = size(model.source_embedding.W,1);
-    l = [ loss( ypred, y, d_vocab) for (ypred, y) in zip(yhat, Rows(target_y))];
+    l = [ loss( ypred, y, d_vocab) for (ypred, y) in zip(yhat, eachrow(target_y))];
     lbar =  mean( l );
 end
 
@@ -120,20 +149,3 @@ function transformer_loss( model, datum, target, target_y)
     d_vocab = size(model.source_embedding.W,1);
     return  Flux.crossentropy( yhat, Flux.onehotbatch(target_y, 1:d_vocab) );
 end
-
-struct Rows
-    A::AbstractArray
-end
-Base.iterate(r::Rows) =  size(r.A,1)>0 ? (r.A[1,:],2) : nothing
-Base.iterate(r::Rows, state) =  state <= size(r.A,1) ? (r.A[state,:], state+1) : nothing
-Base.length(r::Rows) = size(r.A,1)
-Base.eltype(r::Rows) = eltype(r::A)
-
-
-struct Cols
-    A::AbstractArray
-end
-Base.iterate(r::Cols) =  size(r.A,2)>0 ? (r.A[:,1],2) : nothing
-Base.iterate(r::Cols, state) =  state <= size(r.A,2) ? (r.A[:,state], state+1) : nothing
-Base.length(r::Cols) = size(r.A,2)
-Base.eltype(r::Cols) = eltype(r::A)
