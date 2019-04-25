@@ -117,8 +117,8 @@ function transformer_epoch(model, dataset, opt, ps, epoch, steps)
         target = view(batch, :, 1:size(batch,2)-1);  # the target is a copy of the input without the last token
         target_y = view(batch, :, 2:size(batch,2)); # the target_y is what we are predicting (the next token in the input)
         opt.eta = learn_rate(steps,400);
-        # data = [(batch, target, target_y)];
-        # Flux.train!(my_loss, ps, data, opt)
+        data = [(batch, target, target_y)];
+        Flux.train!(my_loss, ps, data, opt)
 
         lbar = my_loss( batch, target, target_y);
 
