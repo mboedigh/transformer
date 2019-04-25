@@ -9,23 +9,18 @@ Returns a trained Transformer model on a trivial task that can predict the next 
 Based on [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the
 paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
 
+    julia> cd("path to folder with transformer_demo.jl")
+    julia> push!(LOAD_PATH, ".")
     julia> include("transformer_demo.jl")
     julia> model = transformer_demo();
-    julia> @assert all( model.predict(1:10) .= 1:10 ); # if it converged
+    julia> @assert all( model.predict(1:10) .= 1:10 ); # true if it converged
 
 """
-function transformer_demo()
-    d_strlen = 10;   # maximum sequence length
-    d_vocab = 11;
-    d_model = 512;
-    n_heads  = 8;    # number of heads in Mulit-headed attention (8 were used in the paper)
-    n_layers = 2;
-    P_DROP = 0.1;
-    n_batches = 20;
-    batch_size = 30;
+function transformer_demo( ;d_strlen=10, d_vocab=11, d_model=512, n_heads=8,
+                            n_layers=2, p_drop = 0.01f0, n_batches = 20, batch_size = 30)
     stepnum = 1
 
-    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers = 2);
+    model = Transformer(d_strlen, d_vocab, d_model, p_drop = p_drop, n_layers = n_layers);
     ps = Flux.params(model);
 
     # optimizer
@@ -43,33 +38,21 @@ function transformer_demo()
     return model
 end
 
+function transformer_hparams_tiny()
+    Dict(
+    :d_strlen => 10,   # maximum sequence length
+    :d_vocab => 11,
+    :d_model => 64,
+    :n_heads => 4,    # number of heads in Mulit-headed attention (8 were used in the paper)
+    :n_layers => 2,    # 6 layers were used in both the encoder and decoder stacks
+    :p_drop => 0.10f0,
+    :n_batches => 20,
+    :batch_size => 30
+    )
+end
+
 function transformer_demo_tiny()
-    d_strlen = 10;   # maximum sequence length
-    d_vocab = 11;
-    d_model = 64;
-    n_heads  = 4;    # number of heads in Mulit-headed attention (8 were used in the paper)
-    n_layers = 2;    # 6 layers were used in both the encoder and decoder stacks
-    P_DROP = 0.1;
-    n_batches = 20;
-    batch_size = 30;
-    stepnum = 1
-
-    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_heads=n_heads, n_layers=n_layers);
-    ps = Flux.params(model);
-
-    # optimizer
-    warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
-
-    opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) );
-    for epoch in 1:30
-        dataset = data_gen( batch_size, d_vocab, d_strlen, d_model, n_batches);
-        # global step = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this to manually extend epochs from the command line (send the for loop to the REPL)
-        stepnum = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this works in the script, but not on the command line
-    end
-
-    # a = predict(model, 1:10 );
-    # @assert all( a .== 1:10);  # this is not deterministic, and so is commented out. Do it with the model that transformer_demo() returns
-    return model
+    transformer_demo( ; transformer_hparams_tiny()... );
 end
 
 learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepnum.^-0.5f0 , stepnum .* warmup.^-1.5);
