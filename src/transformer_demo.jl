@@ -56,7 +56,7 @@ function transformer_demo_tiny()
     batch_size = 30;
     stepnum = 1
 
-    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_layers=n_layers);
+    model = Transformer(d_strlen, d_vocab, d_model, p_drop = P_DROP, n_heads=n_heads, n_layers=n_layers);
     @show model
     ps = Flux.params(model);
 
