@@ -3,8 +3,8 @@ using Statistics
 """
     Diagonal(in::Integer)
 
-Creates an element-wise linear transformation layer with learnable
-vectors `α` and `β`:
+Creates an feature-wise linear transformation layer with learnable
+vectors `α` and `β` for each feature
 
     y = α.*x  .+ β
 
@@ -30,9 +30,7 @@ LayerNorm(h::Integer) = LayerNorm(Diagonal(h))
  
 # define a row based normalization to use with Flux.LayerNorm
 function normalise(x,dims)
-    u = mean(x, dims=dims);
-    p = 1 ./ (std(x,dims=dims) .+ 1f-6);
-    return (x .- u).*p
+    return (x .- mean(x, dims=dims) )./ (std(x,dims=dims) .+ 1f-6)
 end
 (a::LayerNorm)(x,dims=2) = a.diag(normalise(x,dims))
 
