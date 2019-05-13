@@ -31,6 +31,13 @@ export Generator
 export Transformer
 export encode, decode, setdropoutmode, predict, attention
 
+# return mask of 1s and -Inf for positions with content or padding (-Inf)
+function getmask( tokens::AbstractArray{T} ) where T
+    mask = zeros(Float32, size(tokens));
+    mask[ tokens .== 3 ] .= Float32(-1e9);  # the way Transformers.jl does it, -Inf causes softmax to return NaN
+    mask;
+end
+
 struct Transformer
     source_embedding
     positional_encoding
@@ -43,7 +50,8 @@ end
 
 # Transformer
 #    Transformer() returns a model as described in the paper "Attention is all you need"
-function Transformer(; max_seqlen = 20, d_vocab=11, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0)
+# max_seqlen is in regard to max positional encoding. It only needs to be larger than the input sequence length
+function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0)
 
     init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
@@ -87,13 +95,14 @@ function encode(t::Transformer, x)
     return x |> t.source_embedding |> t.positional_encoding |> t.encoder_stack;
 end
 
-function decode(t::Transformer, x, memory)
-    return x |> t.target_embedding |> t.positional_encoding |> x -> t.decoder_stack(x, memory)
+function decode(t::Transformer, x, memory, mask)
+    return x |> t.target_embedding |> t.positional_encoding |> x -> t.decoder_stack(x, memory,mask)
 end
 
 function (t::Transformer)(source, target)
     memory = encode(t, source)
-    out    = decode(t, target, memory)
+    mask = getmask(target)
+    out    = decode(t, target, memory, mask)
     yhat   = t.generator(out)
     return yhat
 end
@@ -117,17 +126,19 @@ function setdropoutmode(t::Transformer, training::Bool = true)
     return curmode
 end
 
-function predict(model::Transformer, datum, start_symbol = 1)
+function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop_symbol=2)
     curmode = setdropoutmode(model, false); # turn training off
 
     memory = encode(model, datum);
-    ys = similar(datum);
-    ys[1] = start_symbol;
-    for i in 2:length(datum)
-        out  = decode(model, ys[1:i - 1], memory) # predict next word based decoding of current word, and memory from encoding
+    ys     = Vector{eltype(datum)}(undef, 1);
+    ys[1]  = start_symbol;
+    maxlen == nothing && (maxlen = length(datum)*2 )
+    for i in 2:maxlen
+        out  = decode(model, ys[1:i - 1], memory, nothing ) # predict next word based decoding of current word, and memory from encoding
         yhat = model.generator(out[end,:]')
         word = Flux.onecold(yhat');
-        ys[i] =  word[1] # set next word.
+        push!(ys, word)
+        word == stop_symbol && break;
     end
     return ys
 

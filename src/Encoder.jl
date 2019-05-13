@@ -17,7 +17,9 @@ function Encoder( mha::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop
 end
 
 # layernorm at this step is from "The Annotated Transformer, but not the paper"
-(en::Encoder)(x) = return en.mha(x,x,x) |> en.ff |> en.norm   # as in The Annotated Transformer
+function (en::Encoder)(x, seq_mask=nothing) 
+    return en.mha(x,x,x, seq_mask) |> en.ff |> en.norm   # as in The Annotated Transformer
+end
 # (en::Encoder)(x) = return en.mha(x,x,x) |> en.ff # as in the paper
 
 @Flux.treelike Encoder
@@ -39,9 +41,9 @@ end
 # In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
 # and the memory keys and values come from the output of the encoder.
 #  We employ a residual connection around each of the two sub-layers ...
-function (de::Decoder)(x, memory)
-    return  de.self_attn( x,x,x,true)                |>
-            x -> de.encoder_attn( x, memory, memory) |>
+function (de::Decoder)(x, memory, mask)
+    return  de.self_attn( x,x,x, nothing, true)                |>
+            x -> de.encoder_attn( x, memory, memory, mask) |>
             de.ff |> de.norm   # layernorm at this step is from "The Annotated Transformer, but not the paper"
 end
 

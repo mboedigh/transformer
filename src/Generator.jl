@@ -7,6 +7,6 @@ function Generator( d_model, n_vocab; init=Flux.glorot_uniform)
 end
 
 # output is n_vocab x target_seq_len matrix. Columns sum to 1
-(g::Generator)(x)  = Flux.softmax( g.W(x)' )'
+(g::Generator)(x)  = Flux.logsoftmax( g.W(x)' )'
 
 @Flux.treelike Generator;
