@@ -17,15 +17,15 @@ paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
     julia> @assert all( model.predict(1:10) .= 1:10 ); # true if it converged
 
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
-    julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model
+    julia> dataset = data_gen_stutter_task( ;n_batches=90, batch_size=30 );
+    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 
 """
 function transformer_demo( ;max_seqlen=12, d_vocab=13, d_model=512, n_heads=8,
                             n_layers=2, p_drop = 0.01f0, n_batches = 20, batch_size = 30, n_epochs = 10)
 
-    model = Transformer(max_seqlen=max_seqlen, d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
-    dataset = data_gen( batch_size, d_vocab, max_seqlen, n_batches);
+    model   = Transformer(d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
+    dataset = data_gen_copy_task( batch_size, d_vocab, max_seqlen, n_batches);
 
     run_transformer( model, dataset, n_epochs);
 
@@ -44,7 +44,7 @@ function data_gen_copy_pair( d_vocab, seqlen )
    (d,d)
 end
 
-# generr
+# generate pair of source-target data. The target is the same as the source, except some tokens (5 and 7) are duplicated 
 function data_gen_stutter_pair( d_vocab, seqlen)
     x = [1 rand(4:d_vocab, 1, seqlen) 2]
     i = LinearIndices(x);
@@ -53,6 +53,25 @@ function data_gen_stutter_pair( d_vocab, seqlen)
 
     k = sort( vcat(vec(i), i[i_fives], i[i_sevens]) )'
     t = x[k];
+    return (x,t);
+end
+
+# generate pair of source-target data. The target is the same as the source except certain characters are swapped
+# if a swappable token (5 or 7) is the last token in the sequence, nothing happens
+# if there are multiple swappable tokens in a row, the token after the set of swappable tokens is moved all the way to the start
+# otherwise it is a standard swap
+function data_gen_dyslexic_pair( d_vocab, seqlen)
+    x = [1 rand(4:d_vocab, 1, seqlen) 2]
+
+    t = copy(x);
+    for i in seqlen:-1:2
+        c = x[i];
+        if (c == 5 || c == 7)
+            t[i]   = t[i+1];
+            t[i+1] = c;
+        end
+    end
+    
     return (x,t);
 end
 
@@ -98,8 +117,19 @@ function data_gen_batch( gen_source_target_pair=()->data_gen_copy_pair(13, 12), 
 end
 
 # create datasets for stutter task. dataset is a collection of batches. max_seqlen is the size of the input sequence (before start and stop tokens are added)
-data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) = [data_gen_batch( ()->data_gen_stutter_pair(d_vocab, max_seqlen), batch_size ) for i in 1:n_batches]
-data_gen_copy_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30)    = [data_gen_batch( ()->data_gen_copy_pair(d_vocab, max_seqlen), batch_size)  for i in 1:n_batches]
+function data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
+    seqlens = rand(4:max_seqlen, n_batches);
+    [data_gen_batch( ()->data_gen_stutter_pair(d_vocab, seqlens[i]), batch_size ) for i in 1:n_batches]
+end
+function data_gen_copy_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30)    
+    seqlens = rand(4:max_seqlen, n_batches);
+    [data_gen_batch( ()->data_gen_copy_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
+end
+# encode variable length sources (batches contain the sequences of the same length)
+function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
+    seqlens = rand(4:max_seqlen,n_batches);
+    [data_gen_batch( ()->data_gen_dyslexic_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
+end
 
 # train, or continue training, the transformer model over the dataset n_epoch (more) times.
 # currentlyk resets the learning rate
@@ -136,8 +166,7 @@ learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepn
 # process one epoch of data (sets of batches)
 function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
     total_tokens = 0
-    total_loss = 0
-    batch_size = size(dataset[1][1],1)
+    
     for (batch_num, batch) in enumerate(dataset) 
         batch_start = time();
         print( "Epoch $epoch: ");
@@ -149,12 +178,12 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
         gs = Flux.gradient( ()->lbar,ps);  
         Flux.Optimise.update!(opt, ps, gs);
         
-        tokens_batch = sum([ sum(x.>3) for x in  batch[2]]) # three special tokens
-        total_tokens += tokens_batch;
-        rate = tokens_batch/(time() - batch_start);
+        tokens = sum([ sum(x.>3) for x in  batch[2]]) # three special tokens
+        total_tokens += tokens;
+        rate = tokens/(time() - batch_start);
 
-        s = Base.Printf.@sprintf( "Batch: %d Step %d: learn_rate: %.6f, batch_loss: %.2f, tokens: %d, token/s: %.2f",
-        batch_num, stepnum, opt.eta, lbar, total_tokens, rate )
+        s = Base.Printf.@sprintf( "Batch: %d sequences: %d tokens: %d steps %d: learn_rate: %.6f batch_loss: %.2f token/s: %.2f",
+        batch_num, size(batch[1],1), tokens, stepnum, opt.eta, lbar, rate )
         println( s );
         stepnum += 1;
     end
@@ -201,11 +230,12 @@ function transformer_batch_loss(model, source::AbstractMatrix, target::AbstractM
     lbar =  mean( q );
 end
 
-# the paper uses smoothed loss function, which I did not implement
-function transformer_loss( model, datum, target, target_y)
+function transformer_loss( model, datum, target)
     yhat   = model(datum, target);
     d_vocab = size(model.source_embedding.W,1);
-    return  Flux.crossentropy( yhat, Flux.onehotbatch(target_y, 1:d_vocab) );
+    mask =  getmask(target) .== 0 .+ 0.0f0;
+
+    return  loss( yhat[1:end-1,:], target[2:end], d_vocab, mask[1:end-1] );
 end
 
 

@@ -4,7 +4,7 @@
 
 __precompile__(false)
 module Transformers
-import Flux
+# using Flux
 using LinearAlgebra
 
 include("Sublayer.jl")
@@ -59,8 +59,9 @@ function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8
     source_embedding           = Embedding(W);   # my implementation did not do this because the reference implementation did not seem to do it
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
-    # target_embedding    = Embedding(W); # with sharing
+    #target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
+    println("shared embedding")
+    target_embedding    = source_embedding; # with sharing
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it

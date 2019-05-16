@@ -14,7 +14,7 @@ end
 #                      PositionwiseFeedForward(d_model, d_model*4, d_model ); p_drop = p_drop );
 # end    
 # encoder_stack       = RepeatedLayer(es)
-#RepeatedLayer(layer, n) = return RepeatedLayer([deepcopy(layer) for i in 1:n]);
+
         
 
 function (e::RepeatedLayer)(x)

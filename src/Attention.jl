@@ -35,7 +35,7 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
 
     Q,K,V = mha.Q(q), mha.K(k), mha.V(v);
     n_k   = (size(q,2)//mha.n_heads).num;
-    h = 1;
+
     query  = [view(Q, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
     key    = [view(K, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
     value  = [view(V, :, (h*n_k+1):(h+1)*n_k) for h in 0:mha.n_heads-1];
@@ -57,10 +57,8 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
         else
             mask .+= triu( fill(type(-1e9),w,w),1);
         end
-        o = [attention(z[1],z[2], z[3],scale,mask) for z in zip(query,key,value)];
-    else
-        o = [attention(z[1],z[2], z[3],scale,mask) for z in zip(query,key,value)];
     end
+    o = [attention(z[1],z[2], z[3],scale,mask) for z in zip(query,key,value)];
     o = hcat(o...); # supposedly slower than reduct(hcat,o), but produces different outputs
     # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower
     # once again projected    

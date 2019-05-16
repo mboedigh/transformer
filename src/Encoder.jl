@@ -8,20 +8,20 @@
 struct Encoder
     mha::Sublayer{MultiHeadedAttention};
     ff::Sublayer{PositionwiseFeedForward};
-    norm::LayerNorm;
+    # norm::LayerNorm;  # not from the paper (in Annotated Transformer)
 end
 
 function Encoder( mha::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0)
     n = size(mha.W.W,2);
-    Encoder( Sublayer(mha,n,p_drop), Sublayer(ff,n,p_drop), LayerNorm(n))
+    # Encoder( Sublayer(mha,n,p_drop), Sublayer(ff,n,p_drop), LayerNorm(n)) # Annotated Transformer (only)
+    Encoder( Sublayer(mha,n,p_drop), Sublayer(ff,n,p_drop))
 end
 
 # layernorm at this step is from "The Annotated Transformer, but not the paper"
-function (en::Encoder)(x, seq_mask=nothing) 
-    return en.mha(x,x,x, seq_mask) |> en.ff |> en.norm   # as in The Annotated Transformer
-end
-# (en::Encoder)(x) = return en.mha(x,x,x) |> en.ff # as in the paper
-
+# function (en::Encoder)(x, seq_mask=nothing) 
+#     return en.mha(x,x,x, seq_mask) |> en.ff |> en.norm   # as in The Annotated Transformer
+# end
+(en::Encoder)(x) = return en.mha(x,x,x) |> en.ff # as in the paper, and the Transformers.jl
 @Flux.treelike Encoder
 
 # Decoder is made of self-attn, src-attn, and feed forward (defined below)
@@ -29,11 +29,12 @@ struct Decoder
     self_attn::Sublayer{MultiHeadedAttention};
     encoder_attn::Sublayer{MultiHeadedAttention};
     ff::Sublayer{PositionwiseFeedForward};
-    norm::LayerNorm;
+    # norm::LayerNorm;  # not from the paper (in Annotated Transformer)
 end
 function Decoder( self::MultiHeadedAttention, memory::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0)
     n = size(self.W.W,2);
-    Decoder( Sublayer(self,n, p_drop), Sublayer(memory,n, p_drop), Sublayer(ff,n, p_drop), LayerNorm(n))
+    # Decoder( Sublayer(self,n, p_drop), Sublayer(memory,n, p_drop), Sublayer(ff,n, p_drop), LayerNorm(n))
+    Decoder( Sublayer(self,n, p_drop), Sublayer(memory,n, p_drop), Sublayer(ff,n, p_drop))
 end
 @Flux.treelike Decoder
 
@@ -41,18 +42,14 @@ end
 # In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
 # and the memory keys and values come from the output of the encoder.
 #  We employ a residual connection around each of the two sub-layers ...
+# x is the target sequence (whole sequence for training, or characters decoded so far for eval)
+# mask is 1 in positions that are part of the sequence and 0 for positions that are padding
+# memory is output from encoder stack
 function (de::Decoder)(x, memory, mask)
     return  de.self_attn( x,x,x, nothing, true)                |>
             x -> de.encoder_attn( x, memory, memory, mask) |>
-            de.ff |> de.norm   # layernorm at this step is from "The Annotated Transformer, but not the paper"
+            de.ff  #  |> de.norm   # layernorm at this step is from "The Annotated Transformer, but not the paper, or Transformers.jl"
 end
-
-# function (en::Decoder)(x, memory)
-#     return  en.self_attn( x,x,x,true)                |>
-#             x -> en.encoder_attn( x, memory, memory) |>
-#             en.ff   # layernorm not used as in the paper"
-# end
-
 
 function Base.show(io::IO, l::Encoder)
     print(io, "Encoder($(l.mha.fn.n_heads) heads)" )
