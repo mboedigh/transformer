@@ -75,11 +75,34 @@ function data_gen_dyslexic_pair( d_vocab, seqlen)
     return (x,t);
 end
 
-# return mask of 1s and -Inf for positions with content or padding (-Inf)
-function getmask( tokens::AbstractArray{T} ) where T
-    mask = zeros(Float32, size(tokens));
-    mask[ tokens .== 3 ] .= Float32(-1e9);  # the way Transformers.jl does it, -Inf causes softmax to return NaN
-    mask;
+# generate pair of source-target data. The target is the same as the source except if there is a five in the sequence
+# all 5s are changed to 7s. If there is a 7 in the sequence all 7s are changed to 5s. If there is a 5 and a 7 
+# both the target is an unaltered copy
+function data_gen_contextual_pair( d_vocab, seqlen)
+    x = [1 rand(4:d_vocab, 1, seqlen) 2]
+
+    t = copy(x);
+    i = x .== 5;
+    j = x .== 7;
+    if any(i) 
+        if !any(j) 
+            t[i] .= 7
+        end
+    elseif any(j)
+        t[j] .= 5
+    end
+
+    return (x,t);
+end
+
+
+# return mask of 1s and 0s where 0s indicates padding tokens and 1s indicate meaningful tokens
+# return "nothing" if there is no padding (convention used in multi-headed attention)
+function getmask( tokens::AbstractArray{T}, padding_idx = 3 ) where T
+    is_padded = tokens .== T(padding_idx);
+    findfirst(is_padded) == nothing && return nothing;
+    
+    mask = is_padded .+ zero(T);  
 end
 
 # convert a collection of source and target sequence tuples to a tuple of matrices
@@ -130,6 +153,12 @@ function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_bat
     seqlens = rand(4:max_seqlen,n_batches);
     [data_gen_batch( ()->data_gen_dyslexic_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
+# encode variable length sources (batches contain the sequences of the same length)
+function data_gen_contextual_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
+    seqlens = rand(4:max_seqlen,n_batches);
+    [data_gen_batch( ()->data_gen_contextual_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
+end
+
 
 # train, or continue training, the transformer model over the dataset n_epoch (more) times.
 # currentlyk resets the learning rate
@@ -178,7 +207,7 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
         gs = Flux.gradient( ()->lbar,ps);  
         Flux.Optimise.update!(opt, ps, gs);
         
-        tokens = sum([ sum(x.>3) for x in  batch[2]]) # three special tokens
+        tokens = sum( batch[2] .!= 3) # sum non-padding target tokens
         total_tokens += tokens;
         rate = tokens/(time() - batch_start);
 
@@ -199,35 +228,51 @@ loss(ypred, y, d_vocab) = Flux.crossentropy( ypred, Flux.onehotbatch(y, 1:d_voca
 function smooth_label( label, d_vocab )
     # each column represents a possible token in d_vocab
     # each row is an element of the sequence
-    y_smooth = fill( 1e-6/d_vocab, size(label,1), d_vocab); 
-    x = Float32( 1 - 1e-6/d_vocab);
+
+    smoothing = Float32( 1e-6)/d_vocab;
+    y_smooth = fill( smoothing/d_vocab, size(label,1), d_vocab); 
+    x = Float32( 1 - smoothing );
     for (i,j) = enumerate(label)
         y_smooth[i,j] = x
     end
     y_smooth;
 end
 
-function loss(ypred, y, d_vocab, mask)
+function loss(yhat, y, d_vocab, mask)
     
     y_smooth =  smooth_label( y, d_vocab );
     
-    ce = y_smooth .* ypred;
+    ce = y_smooth .* yhat;
     -sum( ce .* mask ) / sum(mask);
 end
 
-# calculate mean loss over a batch of data
+# calculate mean loss over one batch of data
 function transformer_batch_loss(model, source::AbstractMatrix, target::AbstractMatrix)
 
-    t_mask =   getmask(target);
-
-    memory   = [encode(model,c) for c in eachrow(source)];
-    out      = [decode( model,x, memory, t_mask) for (x, memory, t_mask) = zip(eachrow(target), memory, eachrow(t_mask) ) ];
-    yhat     = [model.generator( o ) for o in out];
     d_vocab  = size(model.source_embedding.W,1);
+    target_seq_len = size(target,2);
+    mask     =  getmask(target);  # shift target one
 
-    mask = (t_mask .== 0) .+ 0.0f0;
-    q = [ loss( ypred[1:end-1,:], y[2:end], d_vocab, m[1:end-1] ) for (ypred, y, m) in zip(yhat, eachrow(target), eachrow(mask))];
-    lbar =  mean( q );
+    memory   = encode( model, source);
+    out      = decode( model, target, memory, mask);
+
+    yhat     = model.generator( out );
+    y_smooth = smooth_label(vec(target'), d_vocab);   
+    
+    ce = sum( y_smooth[2:end,:] .* yhat[1:end-1,:], dims=2); # summarize for each token
+    n_target_tokens = length(target) - size(target,1)        # don't count start symbol
+    if (mask != nothing)
+        mask   = vec(mask');       # a single column vector for all tokens in all sequences
+        ce = ce .* mask[1:end-1];  # mask all the padding tokens
+        n_target_tokens = sum(mask) - size(target,1)
+    end
+    
+    # mask every seqlen position (implements shift so that prediction is for next token in target)
+    shift_mask = ones(eltype(ce.data), size(ce));
+    shift_mask[target_seq_len:target_seq_len:length(ce)] .= zero(eltype(ce.data));
+    ce  = ce .* shift_mask;
+
+    -sum(ce)/n_target_tokens;
 end
 
 function transformer_loss( model, datum, target)

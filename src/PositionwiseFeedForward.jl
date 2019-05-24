@@ -6,8 +6,8 @@ import Flux
 #  This consists of two linear transformations with a ReLU activation in between."
 # "The dimensionality of input and output is d_model = 512, and the inner-layer has dimensionality d_ff = 2048."
 struct PositionwiseFeedForward
-    w1
-    w2
+    w1::Linear
+    w2::Linear
 end
 
 #  This consists of two linear transformations with a ReLU activation in between."

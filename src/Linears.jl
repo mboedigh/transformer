@@ -1,3 +1,5 @@
+__precompile__(false)
+
 import Flux
 
 struct Linear{F,S,T}
@@ -15,3 +17,4 @@ end
 @Flux.treelike Linear
 
 (a::Linear)(x::AbstractArray) =   a.σ.(x*a.W .+ a.b')
+

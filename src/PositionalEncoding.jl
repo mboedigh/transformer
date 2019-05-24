@@ -4,8 +4,8 @@
 # “positional encodings” to the input embeddings at the bottoms of the encoder and decoder stacks. The positional encodings have
 #  the same dimension dmodel as the embeddings, so that the two can be summed. 
 struct PositionalEncoding
-    d_in
-    d_model
+    d_maxpos::Integer
+    d_model::Integer
     dropout::Flux.Dropout
     encodings
 
@@ -16,7 +16,7 @@ struct PositionalEncoding
     # PE(pos,2i) = sin(pos/10000^(2i/dmodel))
     # PE(pos,2i+1) = cos(pos/10000^(2i/dmodel)
         @assert d_model % 2 == 0
-        len = convert(Int, d_model/2)
+        len = convert(Integer, d_model/2)
     
     # The wavelengths form a geometric progression from 2π to (10000 · 2π) (so freq = 1..10000, also geometric)
         freq = exp10.(range(log10(1), log10(10000), length=len)); # create geometric progress for wavelength
@@ -36,8 +36,14 @@ end
 
 PositionalEncoding(d_maxlen, d_model; p_drop = 0.1f0)  = PositionalEncoding(d_maxlen, d_model, p_drop)
 
-function (p::PositionalEncoding)(x) 
-    # ...we apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks
-    p.dropout( x + p.encodings[1:size(x,1),:] );
+# ...we apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks
+(p::PositionalEncoding)(x) =  p.dropout( x + p.encodings[1:size(x,1),:] );
+
+# batch version. 
+# x is seqlen*batch x d_model matrix. sequences must all be of length seqlen
+function (p::PositionalEncoding)(x::AbstractMatrix, seqlen::Int) 
+n_s = size(x,1) // seqlen;
+A = repeat( p.encodings[1:seqlen,:], Int(n_s), 1);
+p.dropout( x .+ A );
 end
 

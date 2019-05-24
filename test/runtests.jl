@@ -136,4 +136,21 @@ ps = Flux.params( model);
 # one shared embedding layers and one generation layer + encoder_stack + decoder_stack + 2 final output (gain + bias)
 @test length(ps) == 1 + 1 + encoder_stack_params  + decoder_stack_params+ 2
 
-  
+# test batch embedding is the same as sequence embedding (does not demonstrate correctness! only demonstrates consistency)
+slen = size(source,2)
+embedded_batch = embed(model,source);
+test_seqs = rand( 1:size(source,1), 3);
+for k in test_seqs
+   embedded_seq  = embed(model,source[k,:]);
+   @assert isequal( embedded_batch[ (1:slen) .+ slen*(k-1),:], embedded_seq)
+end
+
+# test batch encoding 
+slen = size(source,2)
+encoded_batch = encode( model, source );
+
+test_seqs = rand( 1:size(source,1), 3);
+for k in test_seqs
+   encoded_seq   = encode( model, source[k,:]);
+   @assert isequal( encoded_batch[ (1:slen) .+ slen*(k-1),:], encoded_seq)
+end

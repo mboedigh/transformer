@@ -7,11 +7,11 @@ module Transformers
 # using Flux
 using LinearAlgebra
 
+include("Linears.jl")
 include("Sublayer.jl")
 include("Embedding.jl")
 include("PositionalEncoding.jl")
 include("PositionwiseFeedForward.jl")
-include("Linears.jl")
 include("Attention.jl")
 include("RepeatedLayer.jl")
 include("Encoder.jl")
@@ -29,7 +29,7 @@ export LayerNorm
 export RepeatedLayer
 export Generator
 export Transformer
-export encode, decode, setdropoutmode, predict, attention
+export encode, decode, setdropoutmode, predict, attention, embed
 
 # return mask of 1s and -Inf for positions with content or padding (-Inf)
 function getmask( tokens::AbstractArray{T} ) where T
@@ -60,14 +60,10 @@ function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     #target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
-    println("shared embedding")
     target_embedding    = source_embedding; # with sharing
 
-    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
-
     positional_encoding = PositionalEncoding(max_seqlen, d_model; p_drop = p_drop);
-
+    
     # "self-attention layers in the decoder allow each position in the decoder to attend to all positions in the decoder up to and including that position. We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to −∞) all values in the input of the softmax which correspond to illegal connections"
     @assert d_model % n_heads == 0  "model dimensions (currently = $d_model) must be divisible by n_heads (currently = $n_heads)"
     d_attn              = Int32(ceil(d_model / n_heads))
@@ -76,30 +72,56 @@ function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8
     es = Array{Encoder}(undef, n_layers, 1)
     for i = 1:n_layers
         es[i] = Encoder(MultiHeadedAttention(n_heads, d_model, d_attn),
-                         PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
+        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
     end
     encoder_stack       = RepeatedLayer(es)
-
+    
     # The decoder is also composed of a stack of  N=6  identical layers
     ds = Array{Decoder}(undef, n_layers, 1)
     for i = 1:n_layers
         ds[i] = Decoder(MultiHeadedAttention(n_heads, d_model, d_attn),
-                        MultiHeadedAttention(n_heads, d_model, d_attn),
-                        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
+        MultiHeadedAttention(n_heads, d_model, d_attn),
+        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
     end
     decoder_stack       = RepeatedLayer(ds)
+    
+    # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
+    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
 
     return Transformer(source_embedding, positional_encoding, encoder_stack, decoder_stack, target_embedding, generator);
 end
 
-function encode(t::Transformer, x)
-    return x |> t.source_embedding |> t.positional_encoding |> t.encoder_stack;
+# embed a sequence of tokens in d_model dimensional space
+embed( t::Transformer, x )                = x |> t.source_embedding |> t.positional_encoding;  
+# embed a batch of uniform-length sequences in a d_model dimensional space
+function embed( t::Transformer, x::AbstractMatrix )  
+    tlen = size(x,2); # length of target sequence
+    t.source_embedding( vec(x')) |> x->t.positional_encoding(x, tlen);  
 end
 
-function decode(t::Transformer, x, memory, mask)
-    return x |> t.target_embedding |> t.positional_encoding |> x -> t.decoder_stack(x, memory,mask)
+# embed and encode a seqeunce of tokens
+encode(t::Transformer, x::AbstractVector)               = embed(t,x) |> t.encoder_stack;
+# x is a batch of sequences. Each row is one sequence and each column is one token of that sequence
+function encode(t::Transformer, source::AbstractArray) 
+    num_seqs, seq_len = size(source);
+    t.source_embedding( vec(source')) |> 
+    x->t.positional_encoding(x,seq_len)  |> 
+    x->t.encoder_stack(x,num_seqs);
 end
 
+# decoder for single target sequence 
+# memory is output from encode(::Transformer, ...)
+# mask is 1.0 in positions where the target sequence is invalid (i.e. padded to make seqeunces the same length)
+decode(t::Transformer, x::AbstractVector, memory::AbstractMatrix, mask=nothing) = embed(t,x) |> x -> t.decoder_stack(x, memory, mask);
+# decoder for batch of target sequences
+function decode(t::Transformer, target::AbstractMatrix, memory::AbstractMatrix, mask=nothing) 
+    num_seqs, seq_len = size(target);
+    t.target_embedding( vec(target')) |>  
+    x->t.positional_encoding(x,seq_len)  |> 
+    x->t.decoder_stack(x,memory, mask, num_seqs);
+end
+ 
+# embed, encode and decode a source and target sequence
 function (t::Transformer)(source, target)
     memory = encode(t, source)
     mask = getmask(target)
@@ -135,7 +157,7 @@ function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop
     ys[1]  = start_symbol;
     maxlen == nothing && (maxlen = length(datum)*2 )
     for i in 2:maxlen
-        out  = decode(model, ys[1:i - 1], memory, nothing ) # predict next word based decoding of current word, and memory from encoding
+        out  = decode(model, ys[1:i - 1], memory, nothing ) # predict next word based previous decoding up to the current word, and memory from encoding
         yhat = model.generator(out[end,:]')
         word = Flux.onecold(yhat');
         push!(ys, word)
