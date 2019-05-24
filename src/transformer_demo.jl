@@ -102,7 +102,7 @@ function getmask( tokens::AbstractArray{T}, padding_idx = 3 ) where T
     is_padded = tokens .== T(padding_idx);
     findfirst(is_padded) == nothing && return nothing;
     
-    mask = is_padded .+ zero(T);  
+    mask = one(T) .- is_padded;  
 end
 
 # convert a collection of source and target sequence tuples to a tuple of matrices
@@ -140,25 +140,31 @@ function data_gen_batch( gen_source_target_pair=()->data_gen_copy_pair(13, 12), 
 end
 
 # create datasets for stutter task. dataset is a collection of batches. max_seqlen is the size of the input sequence (before start and stop tokens are added)
+# this task tests batches of variable sequence length (each batch has uniform length sequences)
+# this task tests target sequence padding, since targets are of variable length
 function data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
     seqlens = rand(4:max_seqlen, n_batches);
     [data_gen_batch( ()->data_gen_stutter_pair(d_vocab, seqlens[i]), batch_size ) for i in 1:n_batches]
 end
+
+# simplest task. target is an exact copy of the source
 function data_gen_copy_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30)    
     seqlens = rand(4:max_seqlen, n_batches);
     [data_gen_batch( ()->data_gen_copy_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
+
 # encode variable length sources (batches contain the sequences of the same length)
 function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
     seqlens = rand(4:max_seqlen,n_batches);
     [data_gen_batch( ()->data_gen_dyslexic_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
+
+# this tests varied meaning of tokens depending on the presence of another token in the same sequence
 # encode variable length sources (batches contain the sequences of the same length)
 function data_gen_contextual_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
     seqlens = rand(4:max_seqlen,n_batches);
     [data_gen_batch( ()->data_gen_contextual_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
-
 
 # train, or continue training, the transformer model over the dataset n_epoch (more) times.
 # currentlyk resets the learning rate
@@ -211,8 +217,8 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
         total_tokens += tokens;
         rate = tokens/(time() - batch_start);
 
-        s = Base.Printf.@sprintf( "Batch: %d sequences: %d tokens: %d steps %d: learn_rate: %.6f batch_loss: %.2f token/s: %.2f",
-        batch_num, size(batch[1],1), tokens, stepnum, opt.eta, lbar, rate )
+        s = Base.Printf.@sprintf( "Batch: %d sequences: %d tokens: %d learn_rate: %.5f batch_loss: %.2f token/s: %.1f",
+        batch_num, size(batch[1],1), tokens, opt.eta, lbar, rate )
         println( s );
         stepnum += 1;
     end
@@ -278,7 +284,7 @@ end
 function transformer_loss( model, datum, target)
     yhat   = model(datum, target);
     d_vocab = size(model.source_embedding.W,1);
-    mask =  getmask(target) .== 0 .+ 0.0f0;
+    mask =  getmask(target); 
 
     return  loss( yhat[1:end-1,:], target[2:end], d_vocab, mask[1:end-1] );
 end
