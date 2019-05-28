@@ -56,8 +56,8 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
         fmask = triu( fill(type(-1e9),w,w),1);
     end
     o = [attention(z[1],z[2], z[3],scale, mask, fmask) for z in zip(query,key,value)];
-    o = hcat(o...); # supposedly slower than reduct(hcat,o), but produces different outputs
-    # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower
+    # o = hcat(hcat, o); # supposedly slower than reduct(hcat,o), but produces different outputs (TrackedArray of TrackedReal)
+    o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower (Array of TrackedReal)
     # once again projected    
     return mha.W(o);
 end
@@ -108,15 +108,15 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
         future_mask = triu( fill(type(-1e9),q_len,q_len),1);
     end
 
-    o = [attention(z...,scale,future_mask) for z in qkv];
-
+    o = map( z->attention(z...,scale,future_mask), qkv );
     # all the arrays in o are in the right position, but there is no way to flatten o
     # there is also no way to use a view into preallocated memory and set the contents direction with calls to attention! (if it existed)
     #t1 = vcat( o...);   # stack all scores from entire batch from head 1, then head 2 etc
+    #t1b = reduce(vcat,o);
     #t2 = reshape( t1, (d_s, n_s, n_h, :) ); # shaped as: position x sequence x head x feature_within_head
     #t3 = permutedims( t2, (1,2,4,3));       # permute to: position x feature x sequence x head
     #t4 = reshape( t3, (d_s*n_s, d_h*n_h));  # 
-    o = reshape( permutedims( reshape( vcat( o...), (q_len, n_s, n_h, :) ), (1,2,4,3)), (q_len*n_s, d_h*n_h));  # 
+    o = reshape( permutedims( reshape( reduce( vcat, o), (q_len, n_s, n_h, :) ), (1,2,4,3)), (q_len*n_s, d_h*n_h));  # 
     return mha.W(o);
 
 end
