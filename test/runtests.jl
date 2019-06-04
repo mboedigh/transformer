@@ -1,11 +1,18 @@
+using LinearAlgebra
 using Flux
 using Transformers
+using Statistics
 using Test: @test, @test_broken
 
 lre(x) = -log10.(abs.(x))
 
-include("$(@__DIR__)/../src/make_transformer_data.jl");
+d_model = 512;
+d_strlen = 64;
+d_vocab = 13;
+n_heads = 8;
+model = Transformer( ;d_model = d_model, max_seqlen = d_strlen, d_vocab=d_vocab, n_heads = 8);
 
+datum = [1 4 5 6 7 8 9 10 2];
 
 # each element of datum is a single input sequence. Embedding is a d_model vector describing each element 
 input = datum |> model.source_embedding;  # this only needs to run without throwing an error
@@ -35,7 +42,7 @@ i = xo .!= 0;
 # test normalization
 f(x) = 2x;
 x = [1.0 3 5; 2 4 6];
-s = Sublayer(f, size(x,2), 0.0)
+s = Sublayer(f, size(x,2), p_drop = 0.0f0)
 out = s(x);
 @test_broken  all( lre(out - [-1 0 1.; -1 0 1]) .> 10 ) # for now I'm uisng Sublayer as in reference, not the paper
 
@@ -43,7 +50,7 @@ out = s(x);
 x = rand(2,4)
 xx = f(x)+x
 varxx = var(xx, dims=2) # 9va
-s = Sublayer( f, size(x,2), 0.0)
+s = Sublayer( f, size(x,2), p_drop = 0.0f0)
 out = s(x);
 @test_broken all( lre(out - (xx .- mean(xx,dims=2))./sqrt.(varxx)) .> 10 ) # accurate to at least 10 digits
 
@@ -98,7 +105,7 @@ scale = Float32(1/sqrt(d_attn))
 score = (Q*K')*scale;
 sm_score     = Flux.softmax( score' )';
 Z = sm_score*V;
-@test all( lre( attention(Q,K,V,scale) - Z) .> 10)
+@test all( lre( attention(Q,K,V,nothing,scale) - Z) .> 10)
 
 # MultiHeadedAttention
 mha                 = MultiHeadedAttention( n_heads, d_model, d_attn);
@@ -111,20 +118,20 @@ mha_params = length(ps)
 encoder = model.encoder_stack[1];
 ps = Flux.params(encoder);
 encoder_params = length(ps)
-# 4 params from ff, n_layers*mha (48), 2 from LayerNorm in each of 2 Sublayers, Annotated Transformers adds 2 more for another LayerNorm, which seems to work better in transformer_demo's "copy translation test"
-@test encoder_params == 4 + mha_params + 2*2 + 2 # current implementation has 2 extra parameters for a final layernorm (In annotated trans former bubut not paper)
+# 4 params from ff, 8 params for Q,K,V,W in mha, 2 from LayerNorm in each of 2 Sublayers
+@test encoder_params == 4 + mha_params + 2*2 
 
 # Encoder Stack (Unit with sublayers wrapping MH self-attention -> sublayer wrapping PosFF )
 encoder_stack   = model.encoder_stack;
 encoder_stack_params = length(Flux.params(encoder_stack))
+n_layers = length(encoder_stack.layers );
 @test encoder_stack_params == n_layers*encoder_params
 
 # Decoder (Unit with sublayers wrapping MH self-Attenion -> sublayer wrapping MH encoder_decoder-attention -> sublayer wrapping PosFF)
 decoder = model.decoder_stack[1];
 decoder_params = length(Flux.params(decoder));
-# 4 params from ff,  6*from self attention and 6 from src attention + two final linear from each mha and and from 3 Sublayers with 2 each
-# Annotated Transformers adds 2 more for another LayerNorm, which seems to work better in transformer_demo's "copy translation test"
-@test decoder_params == 4 + 6 + 6 + 2*2 + 3*2 + 2 # we implemented like the annotated transformer, with an extra final layernorm 
+# 4 params from ff,  8 from self attention and 8 from src attention + two final linear from each mha and and from 3 Sublayers with 2 each
+@test decoder_params == 4 + 2*mha_params + 3*2  
 
 # The decoder stack
 decoder_stack = model.decoder_stack;
@@ -133,24 +140,69 @@ decoder_stack_params = length(Flux.params(decoder_stack));
 
 # Transformer model
 ps = Flux.params( model);
-# one shared embedding layers and one generation layer + encoder_stack + decoder_stack + 2 final output (gain + bias)
-@test length(ps) == 1 + 1 + encoder_stack_params  + decoder_stack_params+ 2
+# one shared embedding layers and one generation layer (gain and bias) + encoder_stack + decoder_stack
+@test length(ps) == 1 + 2 + encoder_stack_params  + decoder_stack_params
 
 # test batch embedding is the same as sequence embedding (does not demonstrate correctness! only demonstrates consistency)
+source = [1   6  13  11   6  7  12  12   7  2
+1   6   8  12   6  6  10  13   7  2
+1   8   7  13   5  5   5   6  13  2
+1  12   9   9  11  7   9   7   9  2
+1  11  10   6   5  6   6   6  11  2];
 slen = size(source,2)
+setdropoutmode!(model, false)
 embedded_batch = embed(model,source);
-test_seqs = rand( 1:size(source,1), 3);
-for k in test_seqs
+for k in 1:size(source,1)
    embedded_seq  = embed(model,source[k,:]);
-   @assert isequal( embedded_batch[ (1:slen) .+ slen*(k-1),:], embedded_seq)
+   @test isequal( embedded_batch[ (1:slen) .+ slen*(k-1),:], embedded_seq)
 end
 
 # test batch encoding 
 slen = size(source,2)
 encoded_batch = encode( model, source );
-
 test_seqs = rand( 1:size(source,1), 3);
 for k in test_seqs
    encoded_seq   = encode( model, source[k,:]);
-   @assert isequal( encoded_batch[ (1:slen) .+ slen*(k-1),:], encoded_seq)
+   @test isequal( encoded_batch[ (1:slen) .+ slen*(k-1),:], encoded_seq)
 end
+
+
+########################################
+# compare outputs from single and batch mode MHA
+target = vec([ 1   6   7   7   8   5   5  11   6   9   8   8   9   2   3   3  3 ]);
+# initialize parameters
+d_model = 64;
+mha = MultiHeadedAttention( 4, d_model, (d_model//4).num; init = Flux.glorot_uniform);
+tmask= getmask(target);
+# fit model
+x    = randn( Float32, length(target), d_model); # random input
+batch_mode  = mha(x,x,x,1, tmask); # batch mode with 1 sequence
+seq_mode    = mha(x,x,x,tmask); # seq mode
+@test norm( batch_mode.data - seq_mode.data) ≈ 0
+
+
+x2    = [x;x]
+batch_mode  = mha(x2,x2,x2,2, [tmask;tmask]); # batch mode with 2 sequences
+batch_mode  = batch_mode[ length(target)+1:end,:] 
+@test norm( batch_mode.data - seq_mode.data) ≈ 0
+
+#######################################
+# make sure transformer does not drop gradients (all parameters are actualy updated)
+setdropoutmode!(model,false);
+stepnum = 1;
+warmup = 400;
+opt = Flux.ADAM( 1, (0.9, 0.98) )
+d_model = 512;
+d_strlen = 64;
+d_vocab = 13;
+n_heads = 8;
+model = Transformer( ;d_model = d_model, max_seqlen = d_strlen, d_vocab=d_vocab, n_heads = 8); # new model and parameters
+ps = Flux.params(model);
+ps0 = deepcopy( ps );
+lbar = transformer_loss(model, source, source );  # call loss function to save the result
+gs = Flux.gradient( ()->lbar,ps);  
+Flux.Optimise.update!(opt, ps, gs);
+d = [ sum(p[1]).data - sum(p[2].data) for p in zip(ps, ps0)]
+k = d .≈ 0;
+@test !any(k)
+

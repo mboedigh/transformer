@@ -18,15 +18,19 @@ end
         
 
 function (e::RepeatedLayer)(x)
+   i = 1;
    for layer in e.layers
        x = layer(x)
+       i += 1;
    end
    return x
 end
 
 function (e::RepeatedLayer)(x, xs...)
+    i = 1;
     for layer in e.layers
         x = layer(x, xs...)
+        i += 1;
     end
     return x
  end

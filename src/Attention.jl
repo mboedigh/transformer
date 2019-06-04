@@ -1,16 +1,16 @@
-
 import Flux
 
 # returns the normalized attention score (query_len x key_len) * value matrix
 # q,k,v are the attention matrices
 # qmask is a query sequence mask. it has 1s in positions to keep and 0s in positions to mask (i.e. padded)
 # qmask is a query-length vector that is broadcast over the scores (as if it were repeated for each column of the score matrix )
-function attention( q, k, v, scale, qmask=nothing, mask=nothing)
+function attention( q, k, v, qmask, scale::Real, mask=nothing)
     score = scale.*( q*k');
     qmask!=nothing && (score = score .+ qmask);
-    mask!=nothing  && (score = score .+ mask)
+    mask !=nothing && (score = score .+ mask);
     Flux.softmax(score')'*v  
 end
+
 
 # Instead of performing a single attention function with d_model-dimensional keys, values and queries, we found it beneficial to linearly project the queries, 
 # keys and values h times with different, learned linear projections to dq, dk and dv dimensions, respectively. 
@@ -36,6 +36,7 @@ end
 # query, key, value, mask (additive to presoftmax q*v' matrix with zeros and -Inf)
 # hide is only true under self_attention in decoder. That is always a square mask for a square attention score matrix
 function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
+    # println("single sequence MHA 3")
 
     Q,K,V = mha.Q(q), mha.K(k), mha.V(v);
     n_k   = (size(q,2)//mha.n_heads).num;
@@ -48,28 +49,37 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
     # we need to prevent leftward information flow in the decoder to preserve the auto-regressive property.
     # We implement this inside the scaled dot-product attention by masking out (setting to -inf) all values in the input
     # of the softmax which correspond to illegal connections
-    scale = typeof(q.data[1])(1.0/sqrt(n_k))
+    T = Float32;
+    scale = T(1.0/sqrt(n_k))
     fmask = nothing; # mask future tokens 
     if hide
         w = size(q,1);
-        type = eltype(q.data);
-        fmask = triu( fill(type(-1e9),w,w),1);
+        fmask = triu( fill(T(-1e9),w,w),1);
     end
-    o = [attention(z[1],z[2], z[3],scale, mask, fmask) for z in zip(query,key,value)];
-    # o = hcat(hcat, o); # supposedly slower than reduct(hcat,o), but produces different outputs (TrackedArray of TrackedReal)
-    o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower (Array of TrackedReal)
+
+    qmask = nothing
+    if (mask != nothing)
+        mask = vec(mask');
+        qmask = zeros(T,size(mask));
+        qmask[mask .== 0] .= T( -1e9 ); #TODO: -Inf is guaranteed to work with any type but -1e9 is not, but Softmax fails
+    end
+
+    o = map(z->attention(z..., qmask, scale, fmask), zip(query,key,value));
+    o = hcat(o...); # supposedly slower than reduce(hcat,o), but produces different outputs (TrackedArray of TrackedReal)
+    # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower (Array of TrackedReal)
     # once again projected    
     return mha.W(o);
 end
 (mha::MultiHeadedAttention)(q) = mha(q,q,q); # one argument call for self-attention without masking
 
+using Distributed;
 
 # Batch version
-# query, key, value, mask (additive to presoftmax q*v' matrix with zeros and -Inf)
+# query, key, value, mask for query sequence (vector added (broadcast) to presoftmax q*v' matrix with zeros and -Inf)
 # hide is only true under self_attention in decoder. That is always a square mask for a square attention score matrix
 # q,k,v and output are arrays of size seqlen*n_sequences x d_model
-# input m
 function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_future_tokens=false)
+#    println("batched sequence MHA")
     n_s = num_seqs;             # number of sequences
     q_len = Int(size(q,1)/n_s);   # target (query) sequence length (tokens). All, possibly padded, sequences must be the same length
     @assert size(q,1) % q_len == 0
@@ -82,14 +92,16 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
     d_h   = (size(q,2)//n_h).num;  # dimension of each head
 
     qkv  = nothing;
+    T    = Float32; # TODO make this part of the Transformer Spec and apply it everywhere to avoid mixed floating modes
     if mask == nothing
         qkv = [(view(Q, (i*q_len+1):(i+1)*q_len, (h*d_h+1):(h+1)*d_h), 
-          view(K, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
-          view(V, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h))  for i in 0:n_s-1, h in 0:n_h-1];
+                view(K, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
+                view(V, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
+                nothing)  for i in 0:n_s-1, h in 0:n_h-1];
     else
         mask = vec(mask');
-        qmask = zeros(eltype(q.data),size(mask));
-        qmask[mask .== 0] .= eltype(q.data)( 1e-9 );
+        qmask = zeros(T,size(mask));
+        qmask[mask .== 0] .= T( -1e9 ); #TODO: -Inf is guaranteed to work with any type but -1e9 is not, but Softmax fails
         qkv = [(view(Q, (i*q_len+1):(i+1)*q_len, (h*d_h+1):(h+1)*d_h), 
                 view(K, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
                 view(V, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
@@ -100,23 +112,21 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
     # we need to prevent leftward information flow in the decoder to preserve the auto-regressive property.
     # We implement this inside the scaled dot-product attention by masking out (setting to -inf) all values in the input
     # of the softmax which correspond to illegal connections
-    scale = eltype(q.data)(1.0/sqrt(d_h))
+    scale = T(1.0/sqrt(d_h))
     o = nothing;
     future_mask = nothing;
     if hide_future_tokens
-        type = eltype(q.data);
-        future_mask = triu( fill(type(-1e9),q_len,q_len),1);
+        future_mask = triu( fill(T(-1e9),q_len,q_len),1);
     end
-
-    o = map( z->attention(z...,scale,future_mask), qkv );
+    o = map( z->attention(z..., scale, future_mask), qkv);
     # all the arrays in o are in the right position, but there is no way to flatten o
     # there is also no way to use a view into preallocated memory and set the contents direction with calls to attention! (if it existed)
     #t1 = vcat( o...);   # stack all scores from entire batch from head 1, then head 2 etc
-    #t1b = reduce(vcat,o);
+    #t1b = reduce(vcat,o);  # !caution, this is different type of output than vcat(o...)
     #t2 = reshape( t1, (d_s, n_s, n_h, :) ); # shaped as: position x sequence x head x feature_within_head
     #t3 = permutedims( t2, (1,2,4,3));       # permute to: position x feature x sequence x head
     #t4 = reshape( t3, (d_s*n_s, d_h*n_h));  # 
-    o = reshape( permutedims( reshape( reduce( vcat, o), (q_len, n_s, n_h, :) ), (1,2,4,3)), (q_len*n_s, d_h*n_h));  # 
+    o = reshape( permutedims( reshape( vcat(o...), (q_len, n_s, n_h, :) ), (1,2,4,3)), (q_len*n_s, d_h*n_h));  # 
     return mha.W(o);
 
 end

@@ -2,9 +2,7 @@
 # and a reference implementation [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the
 # Many of the explanatory comments throughout my code are taken directly from the paper
 
-__precompile__(false)
 module Transformers
-# using Flux
 using LinearAlgebra
 
 include("Linears.jl")
@@ -16,6 +14,7 @@ include("Attention.jl")
 include("RepeatedLayer.jl")
 include("Encoder.jl")
 include("Generator.jl")
+include("TransformerLoss.jl")
 
 export Sublayer
 export Embedding
@@ -29,29 +28,52 @@ export LayerNorm
 export RepeatedLayer
 export Generator
 export Transformer
-export encode, decode, setdropoutmode, predict, attention, embed
+export encode, decode, setdropoutmode!, predict, attention, embed, getmask
+export transformer_loss
 
-# return mask of 1s and -Inf for positions with content or padding (-Inf)
-function getmask( tokens::AbstractArray{T} ) where T
-    mask = zeros(Float32, size(tokens));
-    mask[ tokens .== 3 ] .= Float32(-1e9);  # the way Transformers.jl does it, -Inf causes softmax to return NaN
-    mask;
+"""
+    getmask( tokens::AbstractArray{T}, padding_idx = 3 ) 
+
+return Int32 mask of 1s and 0s where 0s indicates padding tokens and 1s indicate meaningful tokens
+return "nothing" if there is no padding (convention used in multi-headed attention)
+tokens can be any type T and T must be comparable to padding_idx (default 3)
+"""
+function getmask( tokens::AbstractArray{T}, padding_idx = 3 ) where T
+    is_padded = tokens .== T(padding_idx);
+    findfirst(is_padded) == nothing && return nothing;
+    
+    mask = one(Int32) .- is_padded;  
 end
 
+"""
+    Transformer
+
+The Transformer model from "Attention is all you need"    
+"""
 struct Transformer
-    source_embedding
-    positional_encoding
-    encoder_stack
-    decoder_stack
-    target_embedding
+    source_embedding::Embedding
+    positional_encoding::PositionalEncoding
+    encoder_stack::RepeatedLayer
+    decoder_stack::RepeatedLayer
+    target_embedding::Embedding
 
-    generator
+    generator::Generator
 end
 
-# Transformer
-#    Transformer() returns a model as described in the paper "Attention is all you need"
-# max_seqlen is in regard to max positional encoding. It only needs to be larger than the input sequence length
-function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0)
+"""
+    Transformer() 
+
+    returns a model as described in the paper "Attention is all you need", Vaswani et. al (2017).
+
+**Keywords**
+- max_seqlen = 1024   the maximum position in positional encoding. It must be larger the max seq length encountered
+- d_vocab    = 13     the size of the shared word embedding matrix for both source and target sequences
+- d_model    = 512    the number of features in the embedding and throughout the model until the final projection
+- n_heads    = 6      the number of attention heads used in Encoder and Decoder. Must divide model dimensions evenly
+- n_layers   = 6      the number of Encoder (and Decoder) components in the encoder (and decoder) stacks
+- p_drop     = 0.01f0 the drop probability used in Flux.Dropout after the embedding step and in each sublayer
+"""
+function Transformer(; max_seqlen = 1024, d_vocab=13, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0)
 
     init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
@@ -72,7 +94,7 @@ function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8
     es = Array{Encoder}(undef, n_layers, 1)
     for i = 1:n_layers
         es[i] = Encoder(MultiHeadedAttention(n_heads, d_model, d_attn),
-        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
+                        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
     end
     encoder_stack       = RepeatedLayer(es)
     
@@ -91,27 +113,71 @@ function Transformer(; max_seqlen = 1024, d_vocab=11, d_model = 512, n_heads = 8
     return Transformer(source_embedding, positional_encoding, encoder_stack, decoder_stack, target_embedding, generator);
 end
 
-# embed a sequence of tokens in d_model dimensional space
+"""
+    Transformer()(input, target)
+
+return log probabilities for predicted output tokens. 
+Note target sequence is masked during the run, so that token at target position i can only see tokens before target position i    
+
+```jldoctest
+julia> model = Transformer()
+julia> input =  target = [1, 4, 5, 6, 2]; # simple copy task (one sequence as a vector)
+julia> output = model( input, target ); # model is not yet fit, so these will be random
+```
+
+See also: [`embed`](@ref), [`encode`](@ref), [`decode`](@ref), [`predict`](@ref), [`generate`](@ref)
+"""
+function (t::Transformer)(source, target)
+    memory = encode(t, source)
+    mask   = getmask(target)
+    out    = decode(t, target, memory, mask)
+    t.generator(out);
+end
+
+"""
+    embed( t::Transformer, x )
+
+embed a tokens in d_model dimensional space with positional encoding
+x can be a vector for a single sequence. If x is a matrix with each row representing a separate sequence of tokens
+
+See also: [`Transformer`](@ref)
+"""
+function embed end
+
 embed( t::Transformer, x )                = x |> t.source_embedding |> t.positional_encoding;  
-# embed a batch of uniform-length sequences in a d_model dimensional space
 function embed( t::Transformer, x::AbstractMatrix )  
     tlen = size(x,2); # length of target sequence
     t.source_embedding( vec(x')) |> x->t.positional_encoding(x, tlen);  
 end
 
-# embed and encode a seqeunce of tokens
+"""
+encode(t::Transformer, x)
+
+embeds and encodes x by passing x through embedding and all layers of the encoder_stack. 
+x can be a single sequence or a matrix with rows representing separate sequences
+
+See also: [`Transformer`](@ref), [`embed`](@ref)
+"""
 encode(t::Transformer, x::AbstractVector)               = embed(t,x) |> t.encoder_stack;
 # x is a batch of sequences. Each row is one sequence and each column is one token of that sequence
 function encode(t::Transformer, source::AbstractArray) 
     num_seqs, seq_len = size(source);
-    t.source_embedding( vec(source')) |> 
+    t.source_embedding( vec(source'))    |> 
     x->t.positional_encoding(x,seq_len)  |> 
     x->t.encoder_stack(x,num_seqs);
 end
 
-# decoder for single target sequence 
-# memory is output from encode(::Transformer, ...)
-# mask is 1.0 in positions where the target sequence is invalid (i.e. padded to make seqeunces the same length)
+
+"""
+decode(t::Transformer, x, enc_output, mask)
+
+embeds x and passes it through all layers of the decoder_stack. 
+x can be a single sequence or a matrix with rows representing separate sequences
+enc_output is output from the encoder_stack
+mask is 1s where x has content and 0s where x is padded (i.e. padded to make seqeunces the same length)
+
+See also: [`Transformer`](@ref), [`encode`](@ref), [`getmask`](@ref)
+"""
 decode(t::Transformer, x::AbstractVector, memory::AbstractMatrix, mask=nothing) = embed(t,x) |> x -> t.decoder_stack(x, memory, mask);
 # decoder for batch of target sequences
 function decode(t::Transformer, target::AbstractMatrix, memory::AbstractMatrix, mask=nothing) 
@@ -120,17 +186,25 @@ function decode(t::Transformer, target::AbstractMatrix, memory::AbstractMatrix, 
     x->t.positional_encoding(x,seq_len)  |> 
     x->t.decoder_stack(x,memory, mask, num_seqs);
 end
- 
-# embed, encode and decode a source and target sequence
-function (t::Transformer)(source, target)
-    memory = encode(t, source)
-    mask = getmask(target)
-    out    = decode(t, target, memory, mask)
-    yhat   = t.generator(out)
-    return yhat
-end
 
-function setdropoutmode(t::Transformer, training::Bool = true)
+
+"""
+    generate(t::Transformer, dec_output)
+
+performs final projection and logsoftmax on decoder output
+
+See also: [`Transformer`](@ref), [`encode`](@ref), [`getmask`](@ref)
+"""
+generate( t::Transformer, dec_output) = t.generator(dec_output)
+
+
+"""
+    setdropoutmode!(::Transformer, training::Bool = true)
+
+sets the dropout mode of a Transformer model to true or false. dropout is used in each sublayer as well as the token embedding    
+return the dropout mode prior to this call
+"""
+function setdropoutmode!(t::Transformer, training::Bool = true)
     curmode = t.positional_encoding.dropout.active;
 
     # set dropout in all layers to training
@@ -149,8 +223,13 @@ function setdropoutmode(t::Transformer, training::Bool = true)
     return curmode
 end
 
+"""
+   predict(::Transformer, input_sequence )
+
+runs transformer model in evaluation mode to translate the given input sequence.    
+"""
 function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop_symbol=2)
-    curmode = setdropoutmode(model, false); # turn training off
+    curmode = setdropoutmode!(model, false); # turn training off
 
     memory = encode(model, datum);
     ys     = Vector{eltype(datum)}(undef, 1);
@@ -165,7 +244,7 @@ function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop
     end
     return ys
 
-    setdropoutmode(model, curmode);
+    setdropoutmode!(model, curmode);
 end
 
 @Flux.treelike Transformer

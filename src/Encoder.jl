@@ -6,19 +6,13 @@
 struct Encoder
     mha::Sublayer{MultiHeadedAttention};
     ff::Sublayer{PositionwiseFeedForward};
-    # norm::LayerNorm;  # not from the paper (in Annotated Transformer)
 end
 
 function Encoder( mha::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0)
     n = size(mha.W.W,2);
-    # Encoder( Sublayer(mha,n,p_drop), Sublayer(ff,n,p_drop), LayerNorm(n)) # Annotated Transformer (only)
     Encoder( Sublayer(mha,n,p_drop=p_drop), Sublayer(ff,n,p_drop=p_drop))
 end
 
-# layernorm at this step is from "The Annotated Transformer, but not the paper"
-# function (en::Encoder)(x, seq_mask=nothing) 
-#     return en.mha(x,x,x, seq_mask) |> en.ff |> en.norm   # as in The Annotated Transformer
-# end
 (en::Encoder)(x) = en.mha(x,x,x) |> en.ff # as in the paper, and the Transformers.jl
 (en::Encoder)(x, num_seqs) = en.mha(x,x,x,num_seqs) |> en.ff
 @Flux.treelike Encoder
@@ -28,11 +22,9 @@ struct Decoder
     self_attn::Sublayer{MultiHeadedAttention};
     encoder_attn::Sublayer{MultiHeadedAttention};
     ff::Sublayer{PositionwiseFeedForward};
-    # norm::LayerNorm;  # not from the paper (in Annotated Transformer)
 end
 function Decoder( self::MultiHeadedAttention, memory::MultiHeadedAttention, ff::PositionwiseFeedForward; p_drop = 0.1f0)
     n = size(self.W.W,2);
-    # Decoder( Sublayer(self,n, p_drop), Sublayer(memory,n, p_drop), Sublayer(ff,n, p_drop), LayerNorm(n))
     Decoder( Sublayer(self,n, p_drop=p_drop), Sublayer(memory,n, p_drop=p_drop), Sublayer(ff,n, p_drop=p_drop))
 end
 @Flux.treelike Decoder
@@ -45,20 +37,17 @@ end
 # mask is 1 in positions that are part of the sequence and 0 for positions that are padding
 # memory is output from encoder stack
 function (de::Decoder)(x, memory, mask)
-    return  de.self_attn( x,x,x, nothing, true)                |>
+    return  de.self_attn( x,x,x, nothing, true)            |>
             x -> de.encoder_attn( x, memory, memory, mask) |>
             de.ff 
-            #  |> de.norm   # layernorm at this step is from "The Annotated Transformer, but not the paper, or Transformers.jl"
 end
 
+# batch version
 function (de::Decoder)(x, memory, mask, num_seqs)
-    return  de.self_attn( x,x,x, num_seqs, nothing, true)                |>
+    return  de.self_attn( x,x,x, num_seqs, nothing, true)            |>
             x -> de.encoder_attn( x, memory, memory, num_seqs, mask) |>
             de.ff  
-            #  |> de.norm   # layernorm at this step is from "The Annotated Transformer, but not the paper, or Transformers.jl"
 end
-
-
 
 function Base.show(io::IO, l::Encoder)
     print(io, "Encoder($(l.mha.fn.n_heads) heads)" )

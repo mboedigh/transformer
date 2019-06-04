@@ -6,6 +6,7 @@ using Transformers
 # using Flux: gradient
 
 """
+    transformer_demo()
 Returns a trained Transformer model on a trivial task that can predict the next token of input sequence (producing an exact copy)
 Based on [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the
 paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
@@ -34,9 +35,10 @@ function transformer_demo( ;max_seqlen=12, d_vocab=13, d_model=512, n_heads=8,
 end
 
 """
-# create datasets for stutter task. dataset is a collection of batches. max_seqlen is the size of the input sequence (before start and stop tokens are added)
-# this task tests batches of variable sequence length (each batch has uniform length sequences)
-# this task tests target sequence padding, since targets are of variable length
+    data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
+Returns a dataset for stutter task. dataset is a collection of batches. max_seqlen is the size of the input sequence (before start and stop tokens are added)
+this task tests batches of variable sequence length (each batch has uniform length sequences)
+this task tests target sequence padding, since targets are of variable length
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
     julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
@@ -47,7 +49,7 @@ function data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batc
 end
 
 """
-# simplest task. target is an exact copy of the source
+simplest task. target is an exact copy of the source
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
     julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
@@ -58,7 +60,7 @@ function data_gen_copy_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches
 end
 
 """
-# encode variable length sources (batches contain the sequences of the same length)
+encode variable length sources (batches contain the sequences of the same length)
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_dyslexic_task( ;n_batches=90, batch_size=30 );
     julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
@@ -69,8 +71,8 @@ function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_bat
 end
 
 """
-# this tests varied meaning of tokens depending on the presence of another token in the same sequence
-# encode variable length sources (batches contain the sequences of the same length)
+this tests varied meaning of tokens depending on the presence of another token in the same sequence
+encode variable length sources (batches contain the sequences of the same length)
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_contextual_task( ;n_batches=90, batch_size=30 );
     julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
@@ -113,9 +115,9 @@ end
 learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepnum.^-0.5f0 , stepnum .* warmup.^-1.5);
 
 # process one epoch of data (sets of batches)
-function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
+function transformer_epoch(model, dataset, opt, ps, epoch, stepnum )
     total_tokens = 0
-    
+    min_loss = Float32(Inf);
     for (batch_num, batch) in enumerate(dataset) 
         batch_start = time();
         print( "Epoch $epoch: ");
@@ -123,7 +125,7 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
 
         # train!(loss, ps, batch, opt) - I break it out in the next few lines below
         # ps = Params(ps);  # I do this no on the caller's side
-        lbar = transformer_batch_loss(model, batch...);  # call loss function to save the result
+        lbar = transformer_loss(model, batch...);  # call loss function to save the result
         gs = Flux.gradient( ()->lbar,ps);  
         Flux.Optimise.update!(opt, ps, gs);
         
@@ -131,77 +133,15 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum)
         total_tokens += tokens;
         rate = tokens/(time() - batch_start);
 
-        s = Base.Printf.@sprintf( "Batch: %d sequences: %d tokens: %d learn_rate: %.5f batch_loss: %.2f token/s: %.1f",
-        batch_num, size(batch[1],1), tokens, opt.eta, lbar, rate )
+        lbar < min_loss && (min_loss = lbar);
+        s = Base.Printf.@sprintf( "Batch: %d  learn_rate: %.5f tokens: %d token/s: %.1f batch_loss: %.2f min_batch_loss: %.2f",
+        batch_num, opt.eta, tokens, rate, lbar, min_loss )
         println( s );
         stepnum += 1;
     end
     return stepnum;
 end
 
-
-# average cross entropy per token (each columns of ypred is a token)
-loss(ypred, y, d_vocab) = Flux.crossentropy( ypred, Flux.onehotbatch(y, 1:d_vocab)' );
-
-
-# label is sequence of tokens (up to max_seq_len)
-function smooth_label( label, d_vocab )
-    # each column represents a possible token in d_vocab
-    # each row is an element of the sequence
-
-    smoothing = Float32( 1e-6)/d_vocab;
-    y_smooth = fill( smoothing/d_vocab, size(label,1), d_vocab); 
-    x = Float32( 1 - smoothing );
-    for (i,j) = enumerate(label)
-        y_smooth[i,j] = x
-    end
-    y_smooth;
-end
-
-function loss(yhat, y, d_vocab, mask)
-    
-    y_smooth =  smooth_label( y, d_vocab );
-    
-    ce = y_smooth .* yhat;
-    -sum( ce .* mask ) / sum(mask);
-end
-
-# calculate mean loss over one batch of data
-function transformer_batch_loss(model, source::AbstractMatrix, target::AbstractMatrix)
-
-    d_vocab  = size(model.source_embedding.W,1);
-    target_seq_len = size(target,2);
-    mask     =  getmask(target);  # shift target one
-
-    memory   = encode( model, source);
-    out      = decode( model, target, memory, mask);
-
-    yhat     = model.generator( out );
-    y_smooth = smooth_label(vec(target'), d_vocab);   
-    
-    ce = sum( y_smooth[2:end,:] .* yhat[1:end-1,:], dims=2); # summarize for each token
-    n_target_tokens = length(target) - size(target,1)        # don't count start symbol
-    if (mask != nothing)
-        mask   = vec(mask');       # a single column vector for all tokens in all sequences
-        ce = ce .* mask[1:end-1];  # mask all the padding tokens
-        n_target_tokens = sum(mask) - size(target,1)
-    end
-    
-    # mask every seqlen position (implements shift so that prediction is for next token in target)
-    shift_mask = ones(eltype(ce.data), size(ce));
-    shift_mask[target_seq_len:target_seq_len:length(ce)] .= zero(eltype(ce.data));
-    ce  = ce .* shift_mask;
-
-    -sum(ce)/n_target_tokens;
-end
-
-function transformer_loss( model, datum, target)
-    yhat   = model(datum, target);
-    d_vocab = size(model.source_embedding.W,1);
-    mask =  getmask(target); 
-
-    return  loss( yhat[1:end-1,:], target[2:end], d_vocab, mask[1:end-1] );
-end
 
 """
 generate example datum for the copy task. 
@@ -277,15 +217,6 @@ function data_gen_contextual_pair( d_vocab, seqlen)
     end
 
     return (x,t);
-end
-
-# return mask of 1s and 0s where 0s indicates padding tokens and 1s indicate meaningful tokens
-# return "nothing" if there is no padding (convention used in multi-headed attention)
-function getmask( tokens::AbstractArray{T}, padding_idx = 3 ) where T
-    is_padded = tokens .== T(padding_idx);
-    findfirst(is_padded) == nothing && return nothing;
-    
-    mask = one(T) .- is_padded;  
 end
 
 # convert a collection of source and target sequence tuples to a tuple of matrices
