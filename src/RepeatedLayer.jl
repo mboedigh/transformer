@@ -6,7 +6,7 @@ struct RepeatedLayer{T<:AbstractArray}
     RepeatedLayer(xs) = new{typeof(xs)}(xs)
 end
 
-# make repeatd layers manually to to initialize params separately 
+# make repeated layers manually to to initialize params separately 
 # example:
 # es = Array{Encoder}(undef, n_layers,1)
 # for i = 1:n_layers
@@ -15,22 +15,16 @@ end
 # end    
 # encoder_stack       = RepeatedLayer(es)
 
-        
-
 function (e::RepeatedLayer)(x)
-   i = 1;
    for layer in e.layers
        x = layer(x)
-       i += 1;
    end
    return x
 end
 
 function (e::RepeatedLayer)(x, xs...)
-    i = 1;
     for layer in e.layers
         x = layer(x, xs...)
-        i += 1;
     end
     return x
  end

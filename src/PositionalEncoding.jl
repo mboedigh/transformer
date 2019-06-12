@@ -12,25 +12,24 @@ struct PositionalEncoding
     # ...we add "positional encodings" to the input embeddings at the bottoms of the encoder and decoder stacks. 
     function PositionalEncoding(d_maxlen, d_model, p_drop) 
     # In this work, we use sine and cosine functions of different frequencies: PE(pos,2i)
-    # where pos is the position (1..d_in) and i is the dimension from (1..2i=dim_model) 
+    # where pos is the position (1..d_in <= d_maxlen) and i is the dimension from (1..2i=dim_model) 
     # PE(pos,2i) = sin(pos/10000^(2i/dmodel))
     # PE(pos,2i+1) = cos(pos/10000^(2i/dmodel)
-        @assert d_model % 2 == 0
-        len = convert(Integer, d_model/2)
     
     # The wavelengths form a geometric progression from 2π to (10000 · 2π) (so freq = 1..10000, also geometric)
-        freq = exp10.(range(log10(1), log10(10000), length=len)); # create geometric progress for wavelength
+        freq = exp10.(range(log10(1.0f0), log10(10000.0f0), length=d_model)); # create geometric progress for wavelength
+        freq = 1f4 .^ ((1:d_model)./Float32(d_model));
         wavelength = 1 ./ freq;
     
-    # The positional encodings have the same dimension dmodel as the embeddings, so that the two can be summed. 
+        pe(pos,i) = i%2==0 ? sin(pos.*wavelength[i]) : cos(pos.*wavelength[i]) 
+        
+        # The positional encodings have the same dimension, dmodel, as the embeddings, so that the two can be summed. 
         encodings = Array{Float32}( undef, d_maxlen, d_model);
-        for i in 1:d_maxlen, j in 1:len
-            encodings[i, j*2-1] = sin(i.*wavelength[j])
-            encodings[i, j*2] = cos(i.*wavelength[j])
+        for pos in 1:d_maxlen, i in 1:d_model
+            encodings[pos, i] = pe(pos,i);
         end
     
         new(d_maxlen, d_model, Flux.Dropout(p_drop), encodings);
-    
     end
 end
 

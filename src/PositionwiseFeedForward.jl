@@ -11,7 +11,7 @@ struct PositionwiseFeedForward
 end
 
 #  This consists of two linear transformations with a ReLU activation in between."
-PositionwiseFeedForward( d_in, d_inner, d_out ) = return PositionwiseFeedForward( Linear(d_in, d_inner, Flux.relu), Linear(d_inner, d_out))
+PositionwiseFeedForward( d_in, d_inner, d_out; initW=Flux.glorot_uniform ) = return PositionwiseFeedForward( Linear(d_in, d_inner, Flux.relu; initW = initW), Linear(d_inner, d_out; initW = initW))
 
 (ff::PositionwiseFeedForward)(x) = ff.w2(ff.w1(x));
 

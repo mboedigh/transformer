@@ -9,13 +9,13 @@ vectors `α` and `β` for each feature
 
     y = α.*x  .+ β
 
-The input `x` must be a array where `size(x, 1) == in`.
+The input `x` must be a array where `size(x, 2) == in`.
 """
 struct Diagonal{T}
   α::T
   β::T
 end
-Diagonal(in::Integer; initα = Flux.ones, initβ = Flux.zeros) =  Diagonal(Flux.param(initα(1,in)), Flux.param(initβ(1,in)))
+Diagonal(in::Integer; initα = Flux.ones, initβ = Flux.zeros) =  Diagonal(Flux.param(initα(1,in)), Flux.param(initβ(1, in)))
 @Flux.treelike Diagonal
 
 function (a::Diagonal)(x)
@@ -28,11 +28,17 @@ struct LayerNorm{T}
 end
 LayerNorm(h::Integer) = LayerNorm(Diagonal(h))
 @Flux.treelike LayerNorm
- 
-# define a row based normalization to use with my version of LayerNorm (row-based)
-normalise(x,dims)        =  (x .- mean(x, dims=dims) )./ (std(x,dims=dims) .+ 1f-6);
 
-(a::LayerNorm)(x,dims=2) = a.diag(normalise(x,dims))
+# very similar to Flux.normalise, but with a stabilization factor added
+function rownormalize(x)
+    μ′ = mean(x, dims = 2);
+    # ϵ = eps(maximum(μ′));
+    ϵ = zero(eltype(x));
+    σ′ = std(x, dims = 2, mean = μ′, corrected=false) .+ ϵ;
+    return (x .- μ′) ./ σ′
+end
+ 
+(a::LayerNorm)(x,dims=2) = a.diag(rownormalize(x))
 
 """
     Sublayer

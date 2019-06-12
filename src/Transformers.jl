@@ -1,5 +1,9 @@
+__precompile__(false)
+
 # Based on the paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
-# and a reference implementation [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) and the
+# and a reference implementation [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html)
+# a second reference implementation [https://github.com/chengchingwen/Transformers.jl]
+# both reference implementations seem to solve my toy problems
 # Many of the explanatory comments throughout my code are taken directly from the paper
 
 module Transformers
@@ -73,9 +77,8 @@ end
 - n_layers   = 6      the number of Encoder (and Decoder) components in the encoder (and decoder) stacks
 - p_drop     = 0.01f0 the drop probability used in Flux.Dropout after the embedding step and in each sublayer
 """
-function Transformer(; max_seqlen = 1024, d_vocab=13, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0)
+function Transformer(; max_seqlen = 1024, d_vocab=13, d_model = 512, n_heads = 8, n_layers = 6, p_drop = 0.1f0, init = Flux.glorot_uniform)
 
-    init = Flux.glorot_uniform;
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
     W = Flux.param(init(d_vocab, d_model)); # need to create weights outside Embedding,to share them between embedding layers and pre-softmax transform
     source_embedding           = Embedding(W);   # my implementation did not do this because the reference implementation did not seem to do it
@@ -89,26 +92,26 @@ function Transformer(; max_seqlen = 1024, d_vocab=13, d_model = 512, n_heads = 8
     # "self-attention layers in the decoder allow each position in the decoder to attend to all positions in the decoder up to and including that position. We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to −∞) all values in the input of the softmax which correspond to illegal connections"
     @assert d_model % n_heads == 0  "model dimensions (currently = $d_model) must be divisible by n_heads (currently = $n_heads)"
     d_attn              = Int32(ceil(d_model / n_heads))
-    mha                 = MultiHeadedAttention(n_heads, d_model, d_attn);
+    mha                 = MultiHeadedAttention(n_heads, d_model, d_attn; init=init);
     ff                  = PositionwiseFeedForward(d_model, d_model * 4, d_model); # "The dimensionality of input and output is d_model = 512, and the inner-layer has dimensionality d_ff = 2048."
     es = Array{Encoder}(undef, n_layers, 1)
     for i = 1:n_layers
-        es[i] = Encoder(MultiHeadedAttention(n_heads, d_model, d_attn),
-                        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
+        es[i] = Encoder(MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+                        PositionwiseFeedForward(d_model, d_model * 4, d_model; initW=init); p_drop = p_drop);
     end
     encoder_stack       = RepeatedLayer(es)
     
     # The decoder is also composed of a stack of  N=6  identical layers
     ds = Array{Decoder}(undef, n_layers, 1)
     for i = 1:n_layers
-        ds[i] = Decoder(MultiHeadedAttention(n_heads, d_model, d_attn),
-        MultiHeadedAttention(n_heads, d_model, d_attn),
-        PositionwiseFeedForward(d_model, d_model * 4, d_model); p_drop = p_drop);
+        ds[i] = Decoder(MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+        MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+        PositionwiseFeedForward(d_model, d_model * 4, d_model; initW=init); p_drop = p_drop);
     end
     decoder_stack       = RepeatedLayer(ds)
     
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    generator = Generator(d_model, d_vocab); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
+    generator = Generator(d_model, d_vocab; init=init); # I am not sharing matrices because the math doesn't make sense to me. Seems like I would rather divide by embedding matrix than project with it
 
     return Transformer(source_embedding, positional_encoding, encoder_stack, decoder_stack, target_embedding, generator);
 end
@@ -179,7 +182,6 @@ mask is 1s where x has content and 0s where x is padded (i.e. padded to make seq
 See also: [`Transformer`](@ref), [`encode`](@ref), [`getmask`](@ref)
 """
 decode(t::Transformer, x::AbstractVector, memory::AbstractMatrix, mask=nothing) = embed(t,x) |> x -> t.decoder_stack(x, memory, mask);
-# decoder for batch of target sequences
 function decode(t::Transformer, target::AbstractMatrix, memory::AbstractMatrix, mask=nothing) 
     num_seqs, seq_len = size(target);
     t.target_embedding( vec(target')) |>  
@@ -239,12 +241,20 @@ function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop
         out  = decode(model, ys[1:i - 1], memory, nothing ) # predict next word based previous decoding up to the current word, and memory from encoding
         yhat = model.generator(out[end,:]')
         word = Flux.onecold(yhat');
-        push!(ys, word)
-        word == stop_symbol && break;
+        push!(ys, word[end])
+        word[end] == stop_symbol && break;
     end
     return ys
 
     setdropoutmode!(model, curmode);
+end
+
+
+function predict(model::Transformer, datum, target)
+    curmode =  setdropoutmode!(model, false);
+    yhat = model(datum, target);
+    setdropoutmode!(model, curmode);
+    Flux.onecold(yhat')'
 end
 
 @Flux.treelike Transformer
@@ -253,7 +263,7 @@ function Base.show(io::IO, l::Transformer)
     d_model = size(l.source_embedding.W, 2);
     n_heads = l.encoder_stack.layers[1].mha.fn.n_heads;
     d_head =  Int(d_model/n_heads)
-    print(io, "Transformer(d_model:$(d_model)); $(length(l.encoder_stack.layers)) layers and $(n_heads) heads (d_head:$(d_head)) in both encoder and decoder stacks")
+    print(io, "Transformer(d_model:$(d_model)) $(length(l.encoder_stack.layers)) layers and $(n_heads) heads (d_head:$(d_head)) in both encoder and decoder stacks")
 end
 
 end

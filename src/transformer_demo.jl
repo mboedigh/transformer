@@ -5,6 +5,8 @@ using Flux, Zygote
 using Transformers
 # using Flux: gradient
 
+init_pe( n, d_model ) = Transformers.PositionalEncoding( 2048, d_model, 0.0f0 )( zeros(n, d_model));
+
 """
     transformer_demo()
 Returns a trained Transformer model on a trivial task that can predict the next token of input sequence (producing an exact copy)
@@ -22,10 +24,10 @@ paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
     julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 
 """
-function transformer_demo( ;max_seqlen=12, d_vocab=13, d_model=512, n_heads=8,
+function transformer_demo( ;max_seqlen=1024, d_vocab=13, d_model=512, n_heads=8,
                             n_layers=2, p_drop = 0.01f0, n_batches = 20, batch_size = 30, n_epochs = 10)
 
-    model   = Transformer(d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
+    model   = Transformer(; max_seqlen=max_seqlen, d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
     dataset = data_gen_copy_task( batch_size, d_vocab, max_seqlen, n_batches);
 
     run_transformer( model, dataset, n_epochs);
@@ -87,10 +89,12 @@ end
 function run_transformer( model, dataset, n_epochs = 10; stepnum=1)
     # optimizer
     warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
-    opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) )
+    # opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) )
+    opt = Flux.ADAM();                     # try default parameters
     ps = Flux.Params(Flux.params(model));
+    min_loss = Float32(Inf);
     for epoch in 1:n_epochs
-        stepnum = transformer_epoch(model, dataset, opt, ps, epoch, stepnum); # this works in the script, but not on the command line
+        min_loss = transformer_epoch(model, dataset, opt, ps, epoch, stepnum,min_loss=min_loss); # this works in the script, but not on the command line
     end
 
     return model # i don't think this is necessary, becuase the model was passed by reference
@@ -103,7 +107,7 @@ function transformer_hparams_tiny()
         :d_model => 64,
         :n_heads => 4,     # number of heads in Mulit-headed attention (8 were used in the paper)
         :n_layers => 2,    # In the paper 6 layers were used in both the encoder and decoder stacks
-        :p_drop => 0.10f0,
+        :p_drop => 0.1f0,
         )
     end
     
@@ -115,13 +119,12 @@ end
 learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepnum.^-0.5f0 , stepnum .* warmup.^-1.5);
 
 # process one epoch of data (sets of batches)
-function transformer_epoch(model, dataset, opt, ps, epoch, stepnum )
+function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = Float32(Inf) )
     total_tokens = 0
-    min_loss = Float32(Inf);
     for (batch_num, batch) in enumerate(dataset) 
         batch_start = time();
         print( "Epoch $epoch: ");
-        opt.eta = learn_rate(stepnum,400);
+        # opt.eta = learn_rate(stepnum,400);
 
         # train!(loss, ps, batch, opt) - I break it out in the next few lines below
         # ps = Params(ps);  # I do this no on the caller's side
@@ -135,11 +138,15 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum )
 
         lbar < min_loss && (min_loss = lbar);
         s = Base.Printf.@sprintf( "Batch: %d  learn_rate: %.5f tokens: %d token/s: %.1f batch_loss: %.2f min_batch_loss: %.2f",
-        batch_num, opt.eta, tokens, rate, lbar, min_loss )
+                                 batch_num, opt.eta, tokens, rate, lbar, min_loss );
         println( s );
-        stepnum += 1;
+        yhat = model( batch[1][1,:], batch[2][1,2:end])
+        yhat = Flux.onecold(yhat')'
+        println( batch[2][1,1:end-1]')
+        println( yhat )
+        println( transformer_loss( model, model( batch[1][1,:], batch[2][1,2:end])));
     end
-    return stepnum;
+    return min_loss;
 end
 
 

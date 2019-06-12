@@ -25,8 +25,8 @@ struct MultiHeadedAttention
     W::Linear
 end
 
-function MultiHeadedAttention( n_heads::Integer, d_in::Integer, d_k::Integer; init = Flux.glorot_uniform) 
-    return MultiHeadedAttention( n_heads, [Linear(d_in, d_k*n_heads, initW=init, initb=init) for i in 1:4]...);
+function MultiHeadedAttention( n_heads::Integer, d_in::Integer, d_k::Integer; init = Flux.glorot_uniform, initb=Flux.zeros) 
+    return MultiHeadedAttention( n_heads, [Linear(d_in, d_k*n_heads, initW=init, initb=initb) for i in 1:4]...);
 end
 
 # On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional output values. 
@@ -65,18 +65,14 @@ function (mha::MultiHeadedAttention)(q,k,v,mask=nothing,hide=false)
     end
 
     o = map(z->attention(z..., qmask, scale, fmask), zip(query,key,value));
-    o = hcat(o...); # supposedly slower than reduce(hcat,o), but produces different outputs (TrackedArray of TrackedReal)
-    # o = reduce( hcat, o); # avoids splat operator (o = hcat(o...)), which is supposedly slower (Array of TrackedReal)
-    # once again projected    
+    o = hcat(o...); 
     return mha.W(o);
 end
 (mha::MultiHeadedAttention)(q) = mha(q,q,q); # one argument call for self-attention without masking
 
-using Distributed;
-
 # Batch version
 # query, key, value, mask for query sequence (vector added (broadcast) to presoftmax q*v' matrix with zeros and -Inf)
-# hide is only true under self_attention in decoder. That is always a square mask for a square attention score matrix
+# hide_future_tokens prevents a token at position i in the target from seeing tokens > i. It is used during self_attention
 # q,k,v and output are arrays of size seqlen*n_sequences x d_model
 function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_future_tokens=false)
 #    println("batched sequence MHA")
@@ -101,7 +97,7 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
     else
         mask = vec(mask');
         qmask = zeros(T,size(mask));
-        qmask[mask .== 0] .= T( -1e9 ); #TODO: -Inf is guaranteed to work with any type but -1e9 is not, but Softmax fails
+        qmask[mask .== 0] .= T( -1e9 ); #TODO: -Inf is guaranteed to work with any type but -1e9 is not, but Softmax fails with -Inf
         qkv = [(view(Q, (i*q_len+1):(i+1)*q_len, (h*d_h+1):(h+1)*d_h), 
                 view(K, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
                 view(V, (i*k_len+1):(i+1)*k_len, (h*d_h+1):(h+1)*d_h), 
@@ -122,7 +118,6 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
     # all the arrays in o are in the right position, but there is no way to flatten o
     # there is also no way to use a view into preallocated memory and set the contents direction with calls to attention! (if it existed)
     #t1 = vcat( o...);   # stack all scores from entire batch from head 1, then head 2 etc
-    #t1b = reduce(vcat,o);  # !caution, this is different type of output than vcat(o...)
     #t2 = reshape( t1, (d_s, n_s, n_h, :) ); # shaped as: position x sequence x head x feature_within_head
     #t3 = permutedims( t2, (1,2,4,3));       # permute to: position x feature x sequence x head
     #t4 = reshape( t3, (d_s*n_s, d_h*n_h));  # 
