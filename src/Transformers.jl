@@ -3,7 +3,7 @@ __precompile__(false)
 # Based on the paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
 # and a reference implementation [Annotated Transfomer](http://nlp.seas.harvard.edu/2018/04/03/attention.html)
 # a second reference implementation [https://github.com/chengchingwen/Transformers.jl]
-# both reference implementations seem to solve my toy problems
+# both reference implementations are good in that they seem to at least solve the toy problems I set up
 # Many of the explanatory comments throughout my code are taken directly from the paper
 
 module Transformers
@@ -71,7 +71,7 @@ end
 
 **Keywords**
 - max_seqlen = 1024   the maximum position in positional encoding. It must be larger the max seq length encountered
-- d_vocab    = 13     the size of the shared word embedding matrix for both source and target sequences
+- d_vocab    = 13     the size of the shared word embedding matrix for both source and target sequences (includes room for 3 special tokens)
 - d_model    = 512    the number of features in the embedding and throughout the model until the final projection
 - n_heads    = 6      the number of attention heads used in Encoder and Decoder. Must divide model dimensions evenly
 - n_layers   = 6      the number of Encoder (and Decoder) components in the encoder (and decoder) stacks
@@ -84,7 +84,7 @@ function Transformer(; max_seqlen = 1024, d_vocab=13, d_model = 512, n_heads = 8
     source_embedding           = Embedding(W);   # my implementation did not do this because the reference implementation did not seem to do it
 
     # In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation
-    #target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing
+    #target_embedding    = Embedding(Flux.param(init(d_vocab, d_model))); # without sharing (and learning)
     target_embedding    = source_embedding; # with sharing
 
     positional_encoding = PositionalEncoding(max_seqlen, d_model; p_drop = p_drop);
@@ -119,8 +119,8 @@ end
 """
     Transformer()(input, target)
 
-return log probabilities for predicted output tokens. 
-Note target sequence is masked during the run, so that token at target position i can only see tokens before target position i    
+return log probabilities for predicted output tokens. convert to predictions using `Flux.onecold(out')'`
+Note: target sequence is masked during the run, so that token at target position i can only see tokens before target position i    
 
 ```jldoctest
 julia> model = Transformer()

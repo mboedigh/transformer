@@ -140,11 +140,21 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = F
         s = Base.Printf.@sprintf( "Batch: %d  learn_rate: %.5f tokens: %d token/s: %.1f batch_loss: %.2f min_batch_loss: %.2f",
                                  batch_num, opt.eta, tokens, rate, lbar, min_loss );
         println( s );
-        yhat = model( batch[1][1,:], batch[2][1,2:end])
-        yhat = Flux.onecold(yhat')'
-        println( batch[2][1,1:end-1]')
-        println( yhat )
-        println( transformer_loss( model, model( batch[1][1,:], batch[2][1,2:end])));
+        x,t = batch[1][1,:], batch[2][1,:];
+        yhat = model( x, t);
+        pred = Flux.onecold(yhat')'[1:end-1];
+        labels = t[2:end];
+        println( labels'); # unmasked golden
+        n = getmask(t);
+        if n != nothing
+            pred .*= n[2:end];
+        end
+        println( pred' );
+        println( transformer_loss( model, x, t));
+
+        if (lbar < .30) # stop (too?) early 
+            break; 
+        end
     end
     return min_loss;
 end

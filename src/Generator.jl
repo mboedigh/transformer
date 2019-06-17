@@ -8,5 +8,6 @@ end
 
 # output is n_vocab x target_seq_len matrix. Columns sum to 1
 (g::Generator)(x)  = Flux.logsoftmax( g.W(x)' )'
+# (g::Generator)(x)  = g.W(x)
 
 @Flux.treelike Generator;
