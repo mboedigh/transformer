@@ -114,7 +114,7 @@ function (mha::MultiHeadedAttention)(q,k,v,num_seqs::Int, mask=nothing,hide_futu
     if hide_future_tokens
         future_mask = triu( fill(T(-1e9),q_len,q_len),1);
     end
-    o = map( z->attention(z..., scale, future_mask), qkv);
+    o = map( z->attention(z..., scale, future_mask), qkv); 
     # all the arrays in o are in the right position, but there is no way to flatten o
     # there is also no way to use a view into preallocated memory and set the contents direction with calls to attention! (if it existed)
     #t1 = vcat( o...);   # stack all scores from entire batch from head 1, then head 2 etc

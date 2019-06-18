@@ -80,7 +80,7 @@ function transformer_loss(model, source::AbstractMatrix, target::AbstractMatrix)
     loss = sum( q .* (log.(q .+ eps(q[1])) .- yhat[1:end-1,:]), dims=2); # sum across all possible vocab for each position in sequence
     
     # mask start of every next sequence in target (start_symbol), because we only use target[2:end] for every target. 
-    shift_mask = ones(eltype(loss.data), size(target));
+    shift_mask = ones(eltype(loss), size(target));
     if (mask != nothing)              # if there is a target mask, then mask all those positions as well
         shift_mask .*= mask;
     end

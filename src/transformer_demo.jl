@@ -21,32 +21,32 @@ paper [Attention is all you need](http://arxiv.org/abs/1706.03762)
 
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_stutter_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 
 """
 function transformer_demo( ;max_seqlen=1024, d_vocab=13, d_model=512, n_heads=8,
                             n_layers=2, p_drop = 0.01f0, n_batches = 20, batch_size = 30, n_epochs = 10)
 
     model   = Transformer(; max_seqlen=max_seqlen, d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
-    dataset = data_gen_copy_task( batch_size, d_vocab, max_seqlen, n_batches);
-
-    run_transformer( model, dataset, n_epochs);
+    model = Flux.mapleaves(Flux.data, model); # for use with Zygote, which wants raw data, not Tracked arrays
+    dataset = data_gen_copy_task( batch_size=batch_size, d_vocab=d_vocab, seqlen=12, n_batches=n_batches);
+    train_transformer!( model, dataset, n_epochs);
 
    # a = predict(model, 1:10 );
    # @assert all( a .== 1:10);  # this is not deterministic, and so is commented out. Do it with the model that transformer_demo() returns
 end
 
 """
-    data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
-Returns a dataset for stutter task. dataset is a collection of batches. max_seqlen is the size of the input sequence (before start and stop tokens are added)
+    data_gen_stutter_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
+Returns a dataset for stutter task. dataset is a collection of batches. seqlen between batches will vary from 3 to seqlen (before special tokens are added)
 this task tests batches of variable sequence length (each batch has uniform length sequences)
 this task tests target sequence padding, since targets are of variable length
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
-    julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+    julia> dataset = data_gen_stutter_task( ;n_batches=90, batch_size=30 );
+    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
-function data_gen_stutter_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
-    seqlens = rand(4:max_seqlen, n_batches);
+function data_gen_stutter_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
+    seqlens = rand(4:seqlen, n_batches);
     [data_gen_batch( ()->data_gen_stutter_pair(d_vocab, seqlens[i]), batch_size ) for i in 1:n_batches]
 end
 
@@ -54,10 +54,10 @@ end
 simplest task. target is an exact copy of the source
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
-function data_gen_copy_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30)    
-    seqlens = rand(4:max_seqlen, n_batches);
+function data_gen_copy_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30)    
+    seqlens = rand(4:seqlen, n_batches);
     [data_gen_batch( ()->data_gen_copy_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
 
@@ -65,10 +65,10 @@ end
 encode variable length sources (batches contain the sequences of the same length)
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_dyslexic_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
-function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
-    seqlens = rand(4:max_seqlen,n_batches);
+function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
+    seqlens = rand(4:seqlen,n_batches);
     [data_gen_batch( ()->data_gen_dyslexic_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
 
@@ -77,21 +77,21 @@ this tests varied meaning of tokens depending on the presence of another token i
 encode variable length sources (batches contain the sequences of the same length)
     julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
     julia> dataset = data_gen_contextual_task( ;n_batches=90, batch_size=30 );
-    julia> run_transformer( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
-function data_gen_contextual_task(;batch_size=20, d_vocab=13, max_seqlen=12, n_batches = 30) 
-    seqlens = rand(4:max_seqlen,n_batches);
+function data_gen_contextual_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
+    seqlens = rand(4:seqlen,n_batches);
     [data_gen_batch( ()->data_gen_contextual_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
 
 # train, or continue training, the transformer model over the dataset n_epoch (more) times.
 # currentlyk resets the learning rate
-function run_transformer( model, dataset, n_epochs = 10; stepnum=1)
+function train_transformer!( model, dataset, n_epochs = 10; stepnum=1)
     # optimizer
     warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
     # opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) )
     opt = Flux.ADAM();                     # try default parameters
-    ps = Flux.Params(Flux.params(model));
+    ps  = Flux.params(model);
     min_loss = Float32(Inf);
     for epoch in 1:n_epochs
         min_loss = transformer_epoch(model, dataset, opt, ps, epoch, stepnum,min_loss=min_loss); # this works in the script, but not on the command line
@@ -123,38 +123,45 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = F
     total_tokens = 0
     for (batch_num, batch) in enumerate(dataset) 
         batch_start = time();
-        print( "Epoch $epoch: ");
+        print( "Epoch $epoch");
         # opt.eta = learn_rate(stepnum,400);
 
-        # train!(loss, ps, batch, opt) - I break it out in the next few lines below
-        # ps = Params(ps);  # I do this no on the caller's side
-        lbar = transformer_loss(model, batch...);  # call loss function to save the result
-        gs = Flux.gradient( ()->lbar,ps);  
-        Flux.Optimise.update!(opt, ps, gs);
+        # lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        # grads = Zygote.gradient( ()->lbar,model);  
+        grads = Zygote.gradient(model) do model
+            return lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        end
+        # Peel outer Tuple to access gradient of first parameter
+        grads = grads[1]
+
+        # Apply recursive update to our model:
+        zyg_update!(opt, model, grads)
+
+        # Flux.Optimise.update!(opt, ps, gs);
         
         tokens = sum( batch[2] .!= 3) # sum non-padding target tokens
         total_tokens += tokens;
         rate = tokens/(time() - batch_start);
 
+        lbar  = transformer_loss(model, batch...);  # call loss function to save the result
         lbar < min_loss && (min_loss = lbar);
-        s = Base.Printf.@sprintf( "Batch: %d  learn_rate: %.5f tokens: %d token/s: %.1f batch_loss: %.2f min_batch_loss: %.2f",
+        s = Base.Printf.@sprintf( ", Batch %d,  learn_rate %.5f,  tokens %d token/s %.1f,  batch_loss %.2f,  min_batch_loss %.2f",
                                  batch_num, opt.eta, tokens, rate, lbar, min_loss );
         println( s );
         x,t = batch[1][1,:], batch[2][1,:];
-        yhat = model( x, t);
-        pred = Flux.onecold(yhat')'[1:end-1];
-        labels = t[2:end];
-        println( labels'); # unmasked golden
+        labels = t[2:end]; # true answer
+        yhat = model( x, t);  # log softmax for predicted tokens
+        pred = Flux.onecold(yhat')'[1:end-1]; # predicted token
         n = getmask(t);
         if n != nothing
             pred .*= n[2:end];
         end
-        println( pred' );
+        labels =  join(map( x->Base.Printf.@sprintf( "%2d ", x), labels ));
+        pred   =  join(map( x->Base.Printf.@sprintf( "%2d ", x), pred ));
+        println( labels); # unmasked golden
+        println( pred );
         println( transformer_loss( model, x, t));
 
-        if (lbar < .30) # stop (too?) early 
-            break; 
-        end
     end
     return min_loss;
 end
@@ -254,4 +261,31 @@ function convert_tuples_to_batch( seq_pair_tuples )
    end
 
    return (source, target)
+end
+
+# Recursive zygote update method, this is the general recursion case:
+function zyg_update!(opt, model, updates)
+	# If this `model` node has no fields, then just return it
+    if nfields(model) == 0
+        return model
+    end
+
+	# If it does have fields, recurse into them:
+    for field_idx in 1:nfields(model)
+        zyg_update!(opt, getfield(model, field_idx), getfield(updates, field_idx))
+    end
+
+    # In the end, return the `model`
+    return model
+end
+# If the `updates` is set to `Nothing`, then just return `model`; this means
+# that there were no changes to be applied to this piece of the model.
+zyg_update!(opt, model, updates::Nothing) = model
+
+# If `model` is an `AbstractArray` and `updates` is too, then apply our Flux
+# optimizer to the incoming gradients and apply them to the model!
+function zyg_update!(opt, model::AbstractArray, updates::AbstractArray)
+    # Sub off to Flux's ADAM optimizer
+    Flux.Optimise.apply!(opt, model, updates)
+    return model .-= updates
 end

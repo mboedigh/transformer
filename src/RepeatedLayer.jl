@@ -30,7 +30,7 @@ function (e::RepeatedLayer)(x, xs...)
  end
  
  Flux.children(c::RepeatedLayer) = c.layers
- Flux.mapchildren(f, c::RepeatedLayer) = RepeatedLayer(f.(c.layers)...)
+ Flux.mapchildren(f, c::RepeatedLayer) = RepeatedLayer([f.(c.layers)...])
  
  Base.getindex(c::RepeatedLayer, i::AbstractArray) = c.layers[i]
  Base.getindex(c::RepeatedLayer, i::Integer) = c.layers[i]

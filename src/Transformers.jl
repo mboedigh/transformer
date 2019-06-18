@@ -229,6 +229,7 @@ end
    predict(::Transformer, input_sequence )
 
 runs transformer model in evaluation mode to translate the given input sequence.    
+output includes start and stop symbols (padding is indicated with 0s if needed)
 """
 function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop_symbol=2)
     curmode = setdropoutmode!(model, false); # turn training off
@@ -254,7 +255,10 @@ function predict(model::Transformer, datum, target)
     curmode =  setdropoutmode!(model, false);
     yhat = model(datum, target);
     setdropoutmode!(model, curmode);
-    Flux.onecold(yhat')'
+    ylabel = reshape( Flux.onecold(yhat'), size(target,2),:)'
+    ylabel = [ones(eltype(ylabel), size(ylabel,1), 1 ) ylabel[:,1:end-1]];
+    mask = getmask(target);
+    ylabel .*= mask;
 end
 
 @Flux.treelike Transformer
