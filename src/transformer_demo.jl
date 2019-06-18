@@ -28,12 +28,16 @@ function transformer_demo( ;max_seqlen=1024, d_vocab=13, d_model=512, n_heads=8,
                             n_layers=2, p_drop = 0.01f0, n_batches = 20, batch_size = 30, n_epochs = 10)
 
     model   = Transformer(; max_seqlen=max_seqlen, d_vocab=d_vocab, d_model=d_model, p_drop = p_drop, n_layers = n_layers);
-    model = Flux.mapleaves(Flux.data, model); # for use with Zygote, which wants raw data, not Tracked arrays
+    
+    ## For testing Zygote 
+    #model = Flux.mapleaves(Flux.data, model); # for use with Zygote, which wants raw data, not Tracked arrays
+
     dataset = data_gen_copy_task( batch_size=batch_size, d_vocab=d_vocab, seqlen=12, n_batches=n_batches);
     train_transformer!( model, dataset, n_epochs);
 
    # a = predict(model, 1:10 );
    # @assert all( a .== 1:10);  # this is not deterministic, and so is commented out. Do it with the model that transformer_demo() returns
+   model
 end
 
 """
@@ -126,18 +130,18 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = F
         print( "Epoch $epoch");
         # opt.eta = learn_rate(stepnum,400);
 
-        # lbar  = transformer_loss(model, batch...);  # call loss function to save the result
-        # grads = Zygote.gradient( ()->lbar,model);  
-        grads = Zygote.gradient(model) do model
-            return lbar  = transformer_loss(model, batch...);  # call loss function to save the result
-        end
-        # Peel outer Tuple to access gradient of first parameter
-        grads = grads[1]
+        lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        gs = Flux.gradient( ()->lbar,ps);  
+        Flux.Optimise.update!(opt, ps, gs);
 
-        # Apply recursive update to our model:
-        zyg_update!(opt, model, grads)
+        # grads = Zygote.gradient(model) do model
+        #     return lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        # end
+        # # Peel outer Tuple to access gradient of first parameter
+        # grads = grads[1]
+        # # Apply recursive update to our model:
+        # zyg_update!(opt, model, grads)
 
-        # Flux.Optimise.update!(opt, ps, gs);
         
         tokens = sum( batch[2] .!= 3) # sum non-padding target tokens
         total_tokens += tokens;

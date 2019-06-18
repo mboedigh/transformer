@@ -251,14 +251,15 @@ function predict(model::Transformer, datum; start_symbol=1, maxlen=nothing, stop
 end
 
 
-function predict(model::Transformer, datum, target)
+function predict(model::Transformer, source, target)
     curmode =  setdropoutmode!(model, false);
-    yhat = model(datum, target);
+    yhat = model(source, target);
     setdropoutmode!(model, curmode);
     ylabel = reshape( Flux.onecold(yhat'), size(target,2),:)'
     ylabel = [ones(eltype(ylabel), size(ylabel,1), 1 ) ylabel[:,1:end-1]];
     mask = getmask(target);
-    ylabel .*= mask;
+    mask == nothing || (ylabel .*= mask);
+    ylabel
 end
 
 @Flux.treelike Transformer
