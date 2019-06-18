@@ -57,8 +57,8 @@ The Transformer model from "Attention is all you need"
 struct Transformer
     source_embedding::Embedding
     positional_encoding::PositionalEncoding
-    encoder_stack::RepeatedLayer
-    decoder_stack::RepeatedLayer
+    encoder_stack::Chain
+    decoder_stack::Chain
     target_embedding::Embedding
 
     generator::Generator

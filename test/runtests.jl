@@ -62,6 +62,15 @@ x = [1.0 3 5; 2 4 6];
 out = r(x);
 @test all( lre(out -  x * 2^6 ) .> 10) # accurate to at least 10 digits
 
+# test multiple arguments
+ds = [(x,b)->2x .+ b for _ = 1:6];
+r = RepeatedLayer(ds)
+x = [1.0 3 5; 2 4 6];
+f(x) = 2x .+ 1;
+t = f(f(f(f(f(f(x))))));
+out = r(x, 1);
+@test all( lre(out -  t) .> 10) # accurate to at least 10 digits
+
 ds = [(x)->2x for i = 1:0];
 r = RepeatedLayer(ds) 
 @test x == r(x)

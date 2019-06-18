@@ -1,37 +1,16 @@
 
 import Flux
+import Flux.Chain
 
-struct RepeatedLayer{T<:AbstractArray}
-    layers::T
-    RepeatedLayer(xs) = new{typeof(xs)}(xs)
-end
+RepeatedLayer( layers::AbstractArray) = Flux.Chain( (layers...) )
 
-# make repeated layers manually to to initialize params separately 
-# example:
-# es = Array{Encoder}(undef, n_layers,1)
-# for i = 1:n_layers
-#     es[i] = Encoder( MultiHeadedAttention( n_heads, d_model, d_attn), 
-#                      PositionwiseFeedForward(d_model, d_model*4, d_model ); p_drop = p_drop );
-# end    
-# encoder_stack       = RepeatedLayer(es)
-
-function (e::RepeatedLayer)(x)
-   for layer in e.layers
-       x = layer(x)
-   end
-   return x
-end
-
-function (e::RepeatedLayer)(x, xs...)
-    for layer in e.layers
-        x = layer(x, xs...)
-    end
-    return x
- end
+applychain(::Tuple{}, x, xs...) = x
+applychain(fs::Tuple, x, xs...) = applychain(Base.tail(fs), Base.first(fs)(x, xs...), xs...)
+(c::Chain)(x,xs...) = applychain(c.layers, x, xs...)
  
- Flux.children(c::RepeatedLayer) = c.layers
- Flux.mapchildren(f, c::RepeatedLayer) = RepeatedLayer([f.(c.layers)...])
+#  Flux.children(c::RepeatedLayer) = c.layers
+#  Flux.mapchildren(f, c::RepeatedLayer) = RepeatedLayer([f.(c.layers)...])
  
- Base.getindex(c::RepeatedLayer, i::AbstractArray) = c.layers[i]
- Base.getindex(c::RepeatedLayer, i::Integer) = c.layers[i]
+#  Base.getindex(c::RepeatedLayer, i::AbstractArray) = c.layers[i]
+#  Base.getindex(c::RepeatedLayer, i::Integer) = c.layers[i]
 
