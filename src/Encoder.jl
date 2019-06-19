@@ -52,3 +52,7 @@ end
 function Base.show(io::IO, l::Encoder)
     print(io, "Encoder($(l.mha.fn.n_heads) heads)" )
 end
+
+function Base.show(io::IO, l::Decoder)
+    print(io, "Decoder($(l.self_attn.fn.n_heads) heads)" )
+end

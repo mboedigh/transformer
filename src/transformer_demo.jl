@@ -95,7 +95,7 @@ function train_transformer!( model, dataset, n_epochs = 10; stepnum=1)
     warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
     # opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) )
     opt = Flux.ADAM();                     # try default parameters
-    ps  = Flux.params(model);
+    ps  = Flux.Params(Flux.params(model)); 
     min_loss = Float32(Inf);
     for epoch in 1:n_epochs
         min_loss = transformer_epoch(model, dataset, opt, ps, epoch, stepnum,min_loss=min_loss); # this works in the script, but not on the command line
