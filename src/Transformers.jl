@@ -34,6 +34,7 @@ export Generator
 export Transformer
 export encode, decode, setdropoutmode!, predict, attention, embed, getmask
 export transformer_loss
+export transformer_hparams
 
 """
     getmask( tokens::AbstractArray{T}, padding_idx = 3 ) 
@@ -264,11 +265,27 @@ end
 
 @Flux.treelike Transformer
 
+# return hyper parameters from a tranformer model
+function transformer_hparams(model::Transformer)
+    d_vocab, d_model = size(model.source_embedding.W);
+    n_layers   = length(model.encoder_stack);
+    n_heads    = first(model.encoder_stack).mha.fn.n_heads;
+    max_seqlen = model.positional_encoding.d_maxpos
+    p_drop     = model.positional_encoding.dropout.p
+        Dict(
+        :max_seqlen => max_seqlen, # positional encoding size (must be larger than input sequence length)
+        :d_vocab => d_vocab,      # total vocab including special "words" for start, stop and unknown
+        :d_model => d_model,
+        :n_heads => n_heads,     # number of heads in Mulit-headed attention (8 were used in the paper)
+        :n_layers => n_layers,    # In the paper 6 layers were used in both the encoder and decoder stacks
+        :p_drop => p_drop,
+        )
+end
+
 function Base.show(io::IO, l::Transformer)
-    d_model = size(l.source_embedding.W, 2);
-    n_heads = l.encoder_stack.layers[1].mha.fn.n_heads;
-    d_head =  Int(d_model/n_heads)
-    print(io, "Transformer(d_model:$(d_model)) $(length(l.encoder_stack.layers)) layers and $(n_heads) heads (d_head:$(d_head)) in both encoder and decoder stacks")
+    hp = transformer_hparams(l);
+    print(io, "Transformer model" );
+    print(io, hp);
 end
 
 end

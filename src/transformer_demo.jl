@@ -56,9 +56,9 @@ end
 
 """
 simplest task. target is an exact copy of the source
-    julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
-    julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
-    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
+julia> dataset = data_gen_copy_task( ;n_batches=90, batch_size=30 );
+julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
 function data_gen_copy_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30)    
     seqlens = rand(4:seqlen, n_batches);
@@ -67,9 +67,9 @@ end
 
 """
 encode variable length sources (batches contain the sequences of the same length)
-    julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
-    julia> dataset = data_gen_dyslexic_task( ;n_batches=90, batch_size=30 );
-    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
+julia> dataset = data_gen_dyslexic_task( ;n_batches=90, batch_size=30 );
+julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
 function data_gen_dyslexic_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
     seqlens = rand(4:seqlen,n_batches);
@@ -79,26 +79,56 @@ end
 """
 this tests varied meaning of tokens depending on the presence of another token in the same sequence
 encode variable length sources (batches contain the sequences of the same length)
-    julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
-    julia> dataset = data_gen_contextual_task( ;n_batches=90, batch_size=30 );
-    julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
+julia> model   = Transformer( ; transformer_hparams_tiny()... ) # note the ';' in call to Transformer (without it, there is a syntax error)
+julia> dataset = data_gen_contextual_task( ;n_batches=90, batch_size=30 );
+julia> train_transformer!( model, dataset, 30); # run for 30 epochs using tiny model (took my tests < 15 epochs)
 """
 function data_gen_contextual_task(;batch_size=20, d_vocab=13, seqlen=12, n_batches = 30) 
     seqlens = rand(4:seqlen,n_batches);
     [data_gen_batch( ()->data_gen_contextual_pair(d_vocab, seqlens[i]), batch_size)  for i in 1:n_batches]
 end
 
+mutable struct Adam_Transformer
+    warmup::Int
+    d_model::Int
+    step::Int
+    beta::Tuple{Float64,Float64}
+    ϵ::Float64;
+    state::IdDict
+end
+
+Adam_Transformer(warmup = 4000, d = 512, β = (0.9, 0.98)) = Adam_Transformer(warmup, d, 1, β, 1e-9, IdDict())
+
+learn_rate( o::Adam_Transformer) = (o.d_model^-0.5) .* min( o.step.^-0.5 , o.step * o.warmup.^-1.5)
+
+function Flux.Optimise.apply!(o::Adam_Transformer, x, Δ)
+  η   = learn_rate(o);
+  β, ϵ   =  o.beta, o.ϵ
+
+  mt, vt, βp = get!(o.state, x, (zero(x), zero(x), β))
+  @. mt = β[1] * mt + (1 - β[1]) * Δ
+  @. vt = β[2] * vt + (1 - β[2]) * Δ^2
+  @. Δ =  mt / (1 - βp[1]) / (√(vt / (1 - βp[2])) + ϵ) * η
+  o.state[x] = (mt, vt, βp .* β)
+  return Δ
+end
+
 # train, or continue training, the transformer model over the dataset n_epoch (more) times.
-# currentlyk resets the learning rate
-function train_transformer!( model, dataset, n_epochs = 10; stepnum=1)
+# currently resets the learning rate
+function train_transformer!( model, dataset, n_epochs = 10; opt = nothing)
     # optimizer
-    warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
-    # opt = Flux.ADAM( learn_rate(stepnum, warmup), (0.9, 0.98) )
-    opt = Flux.ADAM();                     # try default parameters
+    if opt == nothing
+        warmup = 400;  # ramp up learning rate over 400 steps. Then decay as shown in learn_rate below
+        d_model = size(model.source_embedding.W,2);
+        opt = Adam_Transformer(warmup, d_model)
+    end
+    
     ps  = Flux.Params(Flux.params(model)); 
     min_loss = Float32(Inf);
     for epoch in 1:n_epochs
-        min_loss = transformer_epoch(model, dataset, opt, ps, epoch, stepnum,min_loss=min_loss); # this works in the script, but not on the command line
+        min_loss = transformer_epoch(model, dataset, opt, ps, epoch, min_loss=min_loss); 
+        # stepnum += length(dataset)*size(dataset[1][1],1)
+        # stepnum += 1;
     end
 
     return model # i don't think this is necessary, becuase the model was passed by reference
@@ -113,24 +143,55 @@ function transformer_hparams_tiny()
         :n_layers => 2,    # In the paper 6 layers were used in both the encoder and decoder stacks
         :p_drop => 0.1f0,
         )
-    end
+end
+
+function transformer_hparams_deep()
+    Dict(
+        :max_seqlen => 1024, # positional encoding size (must be larger than input sequence length)
+        :d_vocab => 13,      # total vocab including special "words" for start, stop and unknown
+        :d_model => 64,
+        :n_heads => 4,     # number of heads in Mulit-headed attention (8 were used in the paper)
+        :n_layers => 6,    # In the paper 6 layers were used in both the encoder and decoder stacks
+        :p_drop => 0.1f0,
+        )
+end
+
+function transformer_hparams_wide()
+    Dict(
+        :max_seqlen => 1024, # positional encoding size (must be larger than input sequence length)
+        :d_vocab => 13,      # total vocab including special "words" for start, stop and unknown
+        :d_model => 512,
+        :n_heads => 8,     # number of heads in Mulit-headed attention (8 were used in the paper)
+        :n_layers => 2,    # In the paper 6 layers were used in both the encoder and decoder stacks
+        :p_drop => 0.1f0,
+        )
+end
+
+function transformer_hparams_full()
+    Dict(
+        :max_seqlen => 1024, # positional encoding size (must be larger than input sequence length)
+        :d_vocab => 13,      # total vocab including special "words" for start, stop and unknown
+        :d_model => 512,
+        :n_heads => 8,     # number of heads in Mulit-headed attention (8 were used in the paper)
+        :n_layers => 6,    # In the paper 6 layers were used in both the encoder and decoder stacks
+        :p_drop => 0.1f0,
+        )
+end
     
 # much smaller model but it will still eventually converged on the copy task
 function transformer_demo_tiny()
     transformer_demo( ; n_epochs=30, n_batches=20, batch_size=30, transformer_hparams_tiny()... );
 end
 
-learn_rate(stepnum, warmup=4000, d_model=512) = (d_model.^-0.5f0) .* min.( stepnum.^-0.5f0 , stepnum .* warmup.^-1.5);
 
 # process one epoch of data (sets of batches)
-function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = Float32(Inf) )
+function transformer_epoch(model, dataset, opt, ps, epoch; min_loss = Float32(Inf) )
     total_tokens = 0
     for (batch_num, batch) in enumerate(dataset) 
         batch_start = time();
         print( "Epoch $epoch");
-        # opt.eta = learn_rate(stepnum,400);
 
-        lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        lbar  = Transformers.transformer_loss(model, batch...);  # call loss function to save the result
         gs = Flux.gradient( ()->lbar,ps);  
         Flux.Optimise.update!(opt, ps, gs);
 
@@ -147,24 +208,31 @@ function transformer_epoch(model, dataset, opt, ps, epoch, stepnum; min_loss = F
         total_tokens += tokens;
         rate = tokens/(time() - batch_start);
 
-        lbar  = transformer_loss(model, batch...);  # call loss function to save the result
+        # lbar  = Transformers.transformer_loss(model, batch...);  # call loss function to save the result
         lbar < min_loss && (min_loss = lbar);
-        s = Base.Printf.@sprintf( ", Batch %d,  learn_rate %.5f,  tokens %d token/s %.1f,  batch_loss %.2f,  min_batch_loss %.2f",
-                                 batch_num, opt.eta, tokens, rate, lbar, min_loss );
+        lr = learn_rate(opt);
+        stepnum = opt.step;
+        opt.step += 1;
+        s = Base.Printf.@sprintf( ", Batch %d,  learn_rate (stepnum) %.5f (%d),  tokens %d,  token/s %.1f,  batch_loss %.2f,  min_batch_loss %.2f",
+                                 batch_num, lr, stepnum, tokens, rate, lbar, min_loss );
         println( s );
-        x,t = batch[1][1,:], batch[2][1,:];
-        labels = t[2:end]; # true answer
-        yhat = model( x, t);  # log softmax for predicted tokens
-        pred = Flux.onecold(yhat')'[1:end-1]; # predicted token
-        n = getmask(t);
-        if n != nothing
-            pred .*= n[2:end];
+
+        # output a sample problem and prediction
+        if (batch_num%20 == 0) 
+            x,t = batch[1][1,:], batch[2][1,:];
+            labels = t[2:end]; # true answer
+            yhat = model( x, t);  # log softmax for predicted tokens
+            pred = Flux.onecold(yhat')'[1:end-1]; # predicted token
+            n = getmask(t);
+            if n != nothing
+                pred .*= n[2:end];
+            end
+            labels =  join(map( x->Base.Printf.@sprintf( "%2d ", x), labels ));
+            pred   =  join(map( x->Base.Printf.@sprintf( "%2d ", x), pred ));
+            println( labels); # unmasked golden
+            println( pred );
+            println( transformer_loss( model, x, t));
         end
-        labels =  join(map( x->Base.Printf.@sprintf( "%2d ", x), labels ));
-        pred   =  join(map( x->Base.Printf.@sprintf( "%2d ", x), pred ));
-        println( labels); # unmasked golden
-        println( pred );
-        println( transformer_loss( model, x, t));
 
     end
     return min_loss;
