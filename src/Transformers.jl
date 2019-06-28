@@ -35,6 +35,7 @@ export Transformer
 export encode, decode, setdropoutmode!, predict, attention, embed, getmask
 export transformer_loss
 export transformer_hparams
+export add_heads, add_layers
 
 """
     getmask( tokens::AbstractArray{T}, padding_idx = 3 ) 
@@ -265,6 +266,124 @@ end
 
 @Flux.treelike Transformer
 
+function augment_parameters(m::Int, n::Int, x; init=Flux.glorot_uniform)
+    result = init(m,n)
+    result[1:size(x,1), 1:size(x,2)] = x;
+    Flux.param(result)
+end
+
+augment_parameters(m::Int, n::Int, x::TrackedArray; init=Flux.glorot_uniform) = augment_parameters(m,n,x.data, init=init);
+
+
+augment_linear( d_in, d_out, x::Linear; init=Flux.glorot_uniform) = Linear( augment_parameters( d_in, d_out, x.W, init=init), 
+                                                  augment_parameters( 1, d_out, x.b, init=Flux.zeros), 
+                                                  x.σ);
+
+
+# n_heads is the final number of heads                                                
+function augment_mha(mha::MultiHeadedAttention, d_model, n_heads)
+    @assert  d_model % n_heads == 0;
+    d_attn = div(d_model, n_heads);
+    Q = augment_linear( d_model, d_attn*n_heads, mha.Q);
+    K = augment_linear( d_model, d_attn*n_heads, mha.K);
+    V = augment_linear( d_model, d_attn*n_heads, mha.V);
+    W = augment_linear( d_model, d_attn*n_heads, mha.W);    
+    MultiHeadedAttention(n_heads,Q,K,V,W)
+end
+
+function augment_ff(ff::PositionwiseFeedForward, d_model)
+
+    d_inner = d_model*4;
+    w1 = augment_linear( d_model, d_inner, ff.w1);    
+    w2 = augment_linear( d_inner, d_model, ff.w2);    
+    PositionwiseFeedForward( w1, w2 )
+end
+
+# add additional width to a model by increasing d_model and setting the number of heads to n_heads
+# d_model will be increased by n*d_attn, where d_attn is the number of features in each head
+# d_model must divide evenly by the number of new heads = 
+function add_heads( m::Transformer, d_model::Int, n_heads::Int=1; init=Flux.glorot_uniform )
+    c = deepcopy; # alias deepcopy for convenience
+   
+    hp = transformer_hparams(m) 
+    
+    p_drop  = hp[:p_drop];
+    @assert  d_model % n_heads == 0;
+    d_attn  = div( d_model, n_heads);
+
+    source_embedding = Embedding(augment_parameters( hp[:d_vocab], d_model, m.source_embedding.W));
+    target_embedding = source_embedding; # shared is a reference
+    positional_encoding = PositionalEncoding( m.positional_encoding.d_maxpos, d_model, p_drop)
+
+
+    es = Array{Encoder}(undef, hp[:n_layers], 1)
+    for (i, e_old) in enumerate(m.encoder_stack)
+        mha = e_old.mha.fn;
+        e = Encoder(augment_mha(mha, d_model, n_heads), augment_ff(e_old.ff.fn, d_model); p_drop=p_drop )
+        es[i] = e;
+    end
+    encoder_stack       = RepeatedLayer( es )
+    
+    ds = Array{Decoder}(undef, hp[:n_layers], 1)
+    for (i, d_old) in enumerate(m.decoder_stack)
+        self_attn = d_old.self_attn.fn;
+        encoder_attn = d_old.encoder_attn.fn;
+        d = Decoder(augment_mha(self_attn, d_model, n_heads), 
+                    augment_mha(encoder_attn, d_model, n_heads), 
+                    augment_ff( d_old.ff.fn,d_model); p_drop=p_drop )
+        ds[i] = d;
+    end
+    decoder_stack       = RepeatedLayer( ds )
+    
+
+    generator = Generator( augment_linear( d_model, hp[:d_vocab], m.generator.W) );        
+    
+
+    return Transformer( source_embedding, 
+                        positional_encoding, 
+                        encoder_stack, 
+                        decoder_stack, 
+                        target_embedding, 
+                        generator);
+end
+
+# add layers to an existing model
+# n_layers is the final number of layers in the model
+# The new layers are at the base of the stack (closer to the input) 
+# and the old layers are at the end of the stack
+function add_layers( m::Transformer, n_layers::Int=1; init=Flux.glorot_uniform )
+    c = deepcopy; # alias deepcopy for convenience
+   
+    hp = transformer_hparams(m) 
+    d_model = hp[:d_model];
+    n_heads = hp[:n_heads];
+    d_attn = div(d_model,n_heads)
+    p_drop = hp[:p_drop]
+    n_toadd      = n_layers - hp[:n_layers]; 
+    es = Array{Encoder}(undef, n_toadd, 1)
+    for i = 1:n_toadd
+        es[i] = Encoder(MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+        PositionwiseFeedForward(d_model, d_model * 4, d_model; initW=init); p_drop = p_drop);
+    end
+    encoder_stack       = RepeatedLayer( [es; c(m.encoder_stack)...] )
+    
+    # The decoder is also composed of a stack of  N=6  identical layers
+    ds = Array{Decoder}(undef, n_toadd, 1)
+    for i = 1:n_toadd
+        ds[i] = Decoder(MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+        MultiHeadedAttention(n_heads, d_model, d_attn; init=init),
+        PositionwiseFeedForward(d_model, d_model * 4, d_model; initW=init); p_drop = p_drop);
+    end
+    decoder_stack       = RepeatedLayer( [ds; c(m.decoder_stack)...] )
+    
+    return Transformer(c(m.source_embedding), 
+                       c(m.positional_encoding), 
+                       encoder_stack, 
+                       decoder_stack, 
+                       c(m.target_embedding), 
+                       c(m.generator));
+end
+
 # return hyper parameters from a tranformer model
 function transformer_hparams(model::Transformer)
     d_vocab, d_model = size(model.source_embedding.W);
@@ -281,6 +400,8 @@ function transformer_hparams(model::Transformer)
         :p_drop => p_drop,
         )
 end
+
+
 
 function Base.show(io::IO, l::Transformer)
     hp = transformer_hparams(l);

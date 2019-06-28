@@ -127,8 +127,6 @@ function train_transformer!( model, dataset, n_epochs = 10; opt = nothing)
     min_loss = Float32(Inf);
     for epoch in 1:n_epochs
         min_loss = transformer_epoch(model, dataset, opt, ps, epoch, min_loss=min_loss); 
-        # stepnum += length(dataset)*size(dataset[1][1],1)
-        # stepnum += 1;
     end
 
     return model # i don't think this is necessary, becuase the model was passed by reference
