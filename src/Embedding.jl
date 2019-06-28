@@ -1,11 +1,14 @@
+using Flux
 
 struct  Embedding
-    W;  # nvocab x ndim. initialize with TrackedArray to learn parameters or a regular Array to use without tracking (or training)
+    W;  # nvocab x ndim. initialize with TrackedArray to learn parameters or a regular Array to use
 end
-function Embedding(n_vocab, d_model; init=Flux.glorot_uniform)
-    return Embedding(Flux.Tracker.param(init(d_model, n_vocab)))
+function Embedding(n_vocab, d_model; init=(size)->randn(Float32,size))
+    return Embedding(Flux.Tracker.param(init((n_vocab, d_model))))
 end
-(e::Embedding)(x) = e.W[:,x]
-(e::Embedding)(x::Integer)  = e.W[:,x];
+
+(e::Embedding)(x::Integer)  = reshape(e.W[x,:], 1, : )
+(e::Embedding)(x::AbstractVector) = e.W[x,:]
+(e::Embedding)(x::AbstractArray) = e.W[vec(x'),:]
 
 @Flux.treelike Embedding
